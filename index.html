@@ -219,13 +219,6 @@
                     <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
                   </label>
                   <label>
-                    <span>Status</span>
-                    <select id="bookStatusInput">
-                      <option value="disponivel">Disponível</option>
-                      <option value="emprestado">Emprestado</option>
-                    </select>
-                  </label>
-                  <label>
                     <span>Localização</span>
                     <input id="bookShelfInput" type="text" placeholder="Ex: Estante 3 · Prateleira A" />
                   </label>
@@ -238,7 +231,9 @@
                     <input id="bookTombamentoInput" type="text" />
                   </label>
                   <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                    <button class="btn btn-primary" type="submit">Salvar livro</button>
+                    <input id="bookIdInput" type="hidden" />
+                    <button class="btn btn-ghost hidden" id="cancelBookEditBtn" type="button">Cancelar edição</button>
+                    <button class="btn btn-primary" id="saveBookBtn" type="submit">Salvar livro</button>
                   </div>
                 </form>
               </div>
@@ -338,7 +333,9 @@
                       <input id="readerPhoneInput" type="tel" placeholder="Ex: (88) 99999-9999" required />
                     </label>
                     <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                      <button class="btn btn-primary" type="submit">Salvar leitor</button>
+                      <input id="readerIdInput" type="hidden" />
+                      <button class="btn btn-ghost hidden" id="cancelReaderEditBtn" type="button">Cancelar edição</button>
+                      <button class="btn btn-primary" id="saveReaderBtn" type="submit">Salvar leitor</button>
                     </div>
                   </form>
                 </div>
@@ -414,7 +411,18 @@
           <button class="btn btn-primary" type="button" id="copyNotificationBtn">Copiar mensagem</button>
           <button class="btn btn-ghost" type="button" id="sendWhatsappBtn">Enviar por WhatsApp</button>
           <button class="btn btn-secondary" type="button" id="sendEmailBtn">Enviar por e-mail</button>
+          <button class="btn btn-secondary" type="button" id="sendCoordinationBtn">Avisar coordenação</button>
         </div>
+      </div>
+    </div>
+    <div class="modal hidden" id="qrScannerModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="qrScannerModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="qrScannerModal">×</button>
+        <h3>Escanear QR code</h3>
+        <p>Aponte a câmera para o código do livro.</p>
+        <video id="qrScannerVideo" class="qr-scanner-video" autoplay muted playsinline></video>
+        <p id="qrScannerStatus" class="empty-state">Iniciando câmera…</p>
       </div>
     </div>
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>

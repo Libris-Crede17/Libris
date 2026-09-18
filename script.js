@@ -1,7 +1,7 @@
-import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, fetchSignInMethodsForEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, serverTimestamp, Timestamp } from './firebase.js'
+import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, serverTimestamp, Timestamp } from './firebase.js'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
-const config = { organizationName: 'Libris', currentSchoolId: 'escola-padrao', schoolName: 'Biblioteca escolar', emailjs: { serviceId: 'service_vpiw60w', templateId: 'template_s1sr3xs', publicKey: 'FS9fOYvVSD-vMtAWs' } }
+const config = { organizationName: 'Libris', currentSchoolId: 'escola-padrao', schoolName: 'Biblioteca escolar', coordinationEmail: '', emailjs: { serviceId: 'service_vpiw60w', studentTemplateId: 'template_s1sr3xs', coordinationTemplateId: '', publicKey: 'FS9fOYvVSD-vMtAWs' } }
 const demoAdmin = { email: 'admin@teste.com', password: '123456' }
 const defaultCategories = [ ]
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
@@ -18,7 +18,7 @@ const fallbackLoans = [
   { id: 'demo-l1', bookId: 'demo-3', bookCode: '05-0088', bookTitle: 'Biologia das Plantas', readerId: 'demo-r1', readerName: 'Maria Rocha', readerCourse: 'Informática · 2026', days: 7, dueAt: new Date(Date.now() + 86400000 * 3), status: 'active' }
 ]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
-const state = { user: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', unsubs: [] }
+const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [] }
 
 async function loadSchoolData(schoolId = config.currentSchoolId) {
   if (!canUseFirebase || !db) return
@@ -29,6 +29,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
     if (school.exists() && school.data().name) {
       config.schoolName = school.data().name
     }
+    if (school.exists() && school.data().coordinationEmail) config.coordinationEmail = school.data().coordinationEmail
     const schoolNameNode = $('#schoolName')
     if (schoolNameNode) schoolNameNode.textContent = config.schoolName
   } catch (err) {
@@ -38,8 +39,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
 
 async function resolveUserSchool(user) {
   if (!canUseFirebase || !db || !user) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
+    await ensureCurrentSchoolId()
     const schoolNameNode = $('#schoolName')
     if (schoolNameNode) schoolNameNode.textContent = config.schoolName
     return
@@ -49,8 +49,38 @@ async function resolveUserSchool(user) {
     const userDoc = await getDoc(doc(db, 'users', user.uid))
     const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
     await loadSchoolData(schoolId)
+    await ensureCurrentSchoolId()
+    return userDoc.exists() ? userDoc.data() : null
   } catch (err) {
     error(err, 'Não foi possível recuperar a escola deste usuário.')
+    return null
+  }
+}
+
+async function ensureCurrentSchoolId() {
+  if (!canUseFirebase || !db) return
+
+  try {
+    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
+    if (schoolDoc.exists()) {
+      if (schoolDoc.data().name) config.schoolName = schoolDoc.data().name
+      if (schoolDoc.data().coordinationEmail) config.coordinationEmail = schoolDoc.data().coordinationEmail
+      return
+    }
+
+    const schoolsSnap = await getDocs(collection(db, 'schools'))
+    if (!schoolsSnap.empty) {
+      const firstSchool = schoolsSnap.docs[0]
+      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
+      config.currentSchoolId = firstSchoolId
+      if (firstSchool.data().name) config.schoolName = firstSchool.data().name
+    } else {
+      config.currentSchoolId = 'escola-padrao'
+      config.schoolName = 'Biblioteca escolar'
+    }
+  } catch (err) {
+    config.currentSchoolId = 'escola-padrao'
+    config.schoolName = 'Biblioteca escolar'
   }
 }
 const $ = (s) => document.querySelector(s)
@@ -66,29 +96,29 @@ async function lookupBookMetadata(title, author, publisher) {
   if (!query) return { synopsis: '', coverUrl: '' }
 
   try {
-    const url = `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&publisher=${encodeURIComponent(publisher || '')}&limit=1`
-    const response = await fetch(url)
-    if (!response.ok) return { synopsis: '', coverUrl: '' }
-    const data = await response.json()
-    const doc = data.docs?.[0]
-    if (!doc) return { synopsis: '', coverUrl: '' }
-
-    let synopsis = ''
-    if (Array.isArray(doc.subtitle) && doc.subtitle.length) {
-      synopsis = doc.subtitle.join('. ')
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=1&langRestrict=pt`)
+    if (response.ok) {
+      const volume = (await response.json()).items?.[0]?.volumeInfo
+      if (volume) {
+        const coverUrl = volume.imageLinks?.thumbnail?.replace('http://', 'https://') || volume.imageLinks?.smallThumbnail?.replace('http://', 'https://') || ''
+        const synopsis = String(volume.description || '').replace(/<[^>]*>/g, '').trim().slice(0, 700)
+        if (coverUrl || synopsis) return { synopsis, coverUrl }
+      }
     }
-    if (!synopsis && doc.first_sentence) {
-      synopsis = Array.isArray(doc.first_sentence) ? doc.first_sentence.join(' ') : String(doc.first_sentence)
-    }
-    if (!synopsis && doc.author_name) {
-      synopsis = `Livro de ${doc.author_name[0]} publicado por ${publisher || 'editora não informada'}.`
-    }
-
-    const coverId = doc.cover_i || doc.covers?.[0]
-    const coverUrl = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : ''
-    return { synopsis: synopsis.slice(0, 500), coverUrl }
   } catch (error) {
-    console.warn('Não foi possível buscar dados do livro na Open Library:', error)
+    console.warn('Não foi possível buscar dados no Google Books:', error)
+  }
+
+  try {
+    const response = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&publisher=${encodeURIComponent(publisher || '')}&limit=1`)
+    if (!response.ok) return { synopsis: '', coverUrl: '' }
+    const doc = (await response.json()).docs?.[0]
+    if (!doc) return { synopsis: '', coverUrl: '' }
+    const synopsis = Array.isArray(doc.first_sentence) ? doc.first_sentence.join(' ') : String(doc.first_sentence || '')
+    const coverId = doc.cover_i || doc.covers?.[0]
+    return { synopsis: synopsis.slice(0, 700), coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '' }
+  } catch (error) {
+    console.warn('Não foi possível buscar dados na Open Library:', error)
     return { synopsis: '', coverUrl: '' }
   }
 }
@@ -151,7 +181,7 @@ function renderLoans() {
   }).join('') : '<tr><td colspan="5">Nenhum empréstimo ativo.</td></tr>'
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew)); $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify))
 }
-function renderBooks() { const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); e.books.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook)) }
+function renderBooks() { const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); e.books.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook)) }
 function renderReaderSelector() {
   const select = $('#readerSelectInput')
   if (!select) return
@@ -162,20 +192,26 @@ function renderReaderSelector() {
   })
   select.innerHTML = options.join('')
 }
-function renderReaders() { const q = state.readerQuery.toLowerCase().trim(), list = state.readers.filter((r) => !q || [r.name, r.type, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))); e.readers.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type)}</td><td>${esc(r.course || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); renderReaderSelector() }
+function renderReaders() { const q = state.readerQuery.toLowerCase().trim(), list = state.readers.filter((r) => !q || [r.name, r.type, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))); e.readers.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type)}</td><td>${esc(r.course || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); renderReaderSelector() }
 function updateReaderFields() { const student = $('#readerTypeInput').value === 'Aluno'; [['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => { const f = $(s); f.hidden = !visible; f.classList.toggle('hidden', !visible) }); $('#readerCourseInput').required = student; $('#readerRegistrationInput').required = student; $('#readerCpfInput').required = !student }
 function tab(name) { $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name)); $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === name)) }
 function openForm(name, panel, input) { tab(name); $(panel).classList.remove('hidden'); $(input).focus(); $(panel).scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+function resetBookForm() { $('#bookForm').reset(); $('#bookIdInput').value = ''; $('#bookFormPanel h3').textContent = 'Cadastrar livro'; $('#saveBookBtn').textContent = 'Salvar livro'; $('#cancelBookEditBtn').classList.add('hidden'); renderCategorySelect(); $('#bookYearInput').value = new Date().getFullYear(); $('#bookQuantityInput').value = 1 }
+function resetReaderForm() { $('#readerForm').reset(); $('#readerIdInput').value = ''; $('#readerFormPanel h3').textContent = 'Cadastrar leitor'; $('#saveReaderBtn').textContent = 'Salvar leitor'; $('#cancelReaderEditBtn').classList.add('hidden'); updateReaderFields() }
+function editBook(id) { const book = state.books.find((item) => item.id === id); if (!book) return; openForm('acervo', '#bookFormPanel', '#bookTitleInput'); $('#bookIdInput').value = id; $('#bookTitleInput').value = book.title || ''; $('#bookAuthorInput').value = book.author || ''; $('#bookPublisherInput').value = book.publisher || ''; $('#bookCategoryInput').value = book.categoryId || ''; $('#bookYearInput').value = book.year || ''; $('#bookShelfInput').value = book.shelf || ''; $('#bookQuantityInput').value = Number(book.total || 1); $('#bookTombamentoInput').value = book.tombamento || ''; $('#bookFormPanel h3').textContent = 'Editar livro'; $('#saveBookBtn').textContent = 'Atualizar livro'; $('#cancelBookEditBtn').classList.remove('hidden') }
+function editReader(id) { const reader = state.readers.find((item) => item.id === id); if (!reader) return; openForm('leitores', '#readerFormPanel', '#readerNameInput'); $('#readerIdInput').value = id; $('#readerNameInput').value = reader.name || ''; $('#readerTypeInput').value = reader.type || 'Aluno'; $('#readerCourseInput').value = reader.course || ''; $('#readerRegistrationInput').value = reader.matricula || ''; $('#readerCpfInput').value = reader.cpf || ''; $('#readerEmailInput').value = reader.email || ''; $('#readerPhoneInput').value = reader.phone || ''; $('#readerFormPanel h3').textContent = 'Editar leitor'; $('#saveReaderBtn').textContent = 'Atualizar leitor'; $('#cancelReaderEditBtn').classList.remove('hidden'); updateReaderFields() }
 
 async function addBook(event) {
   event.preventDefault()
   const button = $('#bookForm button[type="submit"]')
+  const editingId = $('#bookIdInput').value
   const categoryId = $('#bookCategoryInput').value
   const selectedCategory = getCategoryOptions().find((c) => c.id === categoryId)
   const title = $('#bookTitleInput').value.trim()
   const author = $('#bookAuthorInput').value.trim()
   const publisher = $('#bookPublisherInput').value.trim()
-  const existingMeta = await lookupBookMetadata(title, author, publisher)
+  const existingBook = editingId ? state.books.find((item) => item.id === editingId) : null
+  const existingMeta = editingId ? { synopsis: existingBook?.synopsis || '', coverUrl: existingBook?.coverUrl || '' } : await lookupBookMetadata(title, author, publisher)
   const book = {
     title,
     author,
@@ -188,9 +224,17 @@ async function addBook(event) {
     synopsis: existingMeta.synopsis,
     coverUrl: existingMeta.coverUrl
   }
-  if (!book.title || !book.author || !Number.isInteger(book.total) || book.total < 1 || !selectedCategory) return toast('Preencha título, autor, categoria e quantidade válida.', 'error')
+  const borrowedCopies = existingBook ? Number(existingBook.total || 0) - Number(existingBook.available || 0) : 0
+  if (!book.title || !book.author || !Number.isInteger(book.total) || book.total < 1 || !selectedCategory || book.total < borrowedCopies) return toast(book.total < borrowedCopies ? `A quantidade não pode ser menor que os ${borrowedCopies} exemplares emprestados.` : 'Preencha título, autor, categoria e quantidade válida.', 'error')
   loading(button, true, 'Salvando…')
   try {
+    if (editingId) {
+      const availableCopies = book.total - borrowedCopies
+      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory.name, updatedAt: serverTimestamp() })
+      resetBookForm()
+      toast('Livro atualizado com sucesso.')
+      return
+    }
     const schoolRef = doc(db, 'schools', config.currentSchoolId)
     const schoolSnap = await getDoc(schoolRef)
     const existingBooksSnap = await getDocs(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)))
@@ -229,7 +273,7 @@ async function addBook(event) {
       })
     })
 
-    $('#bookForm').reset(); renderCategorySelect(); $('#bookYearInput').value = new Date().getFullYear(); $('#bookQuantityInput').value = 1
+    resetBookForm()
     toast('Livro cadastrado com sucesso.')
   } catch (err) { error(err, 'Não foi possível salvar o livro.') } finally { loading(button, false) }
 }
@@ -256,9 +300,45 @@ async function removeCategory(id) {
     toast('Categoria apagada.')
   } catch (err) { error(err, 'Não foi possível apagar a categoria.') }
 }
-async function addReader(event) { event.preventDefault(); const button = $('#readerForm button[type="submit"]'), type = $('#readerTypeInput').value, reader = { schoolId: config.currentSchoolId, name: $('#readerNameInput').value.trim(), type, course: type === 'Aluno' ? $('#readerCourseInput').value.trim() : '', matricula: type === 'Aluno' ? $('#readerRegistrationInput').value.trim() : '', cpf: type !== 'Aluno' ? $('#readerCpfInput').value.trim() : '', email: $('#readerEmailInput').value.trim(), phone: $('#readerPhoneInput').value.trim(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() }; if (!reader.name || !reader.email || !reader.phone || (type === 'Aluno' && (!reader.course || !reader.matricula)) || (type !== 'Aluno' && !reader.cpf)) return toast('Preencha todos os campos obrigatórios.', 'error'); loading(button, true, 'Salvando…'); try { await addDoc(collection(db, 'readers'), reader); $('#readerForm').reset(); updateReaderFields(); toast('Leitor cadastrado com sucesso.') } catch (err) { error(err, 'Não foi possível salvar o leitor.') } finally { loading(button, false) } }
-async function removeBook(id) { if (!confirm('Apagar este livro do acervo?')) return; try { await deleteDoc(doc(db, 'books', id)); toast('Livro apagado.') } catch (err) { error(err, 'Não foi possível apagar o livro.') } }
-async function removeReader(id) { if (!confirm('Apagar este leitor?')) return; try { await deleteDoc(doc(db, 'readers', id)); toast('Leitor apagado.') } catch (err) { error(err, 'Não foi possível apagar o leitor.') } }
+async function addReader(event) {
+  event.preventDefault()
+  const button = $('#readerForm button[type="submit"]')
+  const editingId = $('#readerIdInput').value
+  const type = $('#readerTypeInput').value
+  const reader = {
+    schoolId: config.currentSchoolId,
+    name: $('#readerNameInput').value.trim(),
+    type,
+    course: type === 'Aluno' ? $('#readerCourseInput').value.trim() : '',
+    matricula: type === 'Aluno' ? $('#readerRegistrationInput').value.trim() : '',
+    cpf: type !== 'Aluno' ? $('#readerCpfInput').value.trim() : '',
+    email: $('#readerEmailInput').value.trim(),
+    phone: $('#readerPhoneInput').value.trim()
+  }
+  if (!reader.name || !reader.email || !reader.phone || (type === 'Aluno' && (!reader.course || !reader.matricula)) || (type !== 'Aluno' && !reader.cpf)) return toast('Preencha todos os campos obrigatórios.', 'error')
+  loading(button, true, editingId ? 'Atualizando…' : 'Salvando…')
+  try {
+    if (editingId) {
+      await updateDoc(doc(db, 'readers', editingId), { ...reader, updatedAt: serverTimestamp() })
+      resetReaderForm()
+      toast('Leitor atualizado com sucesso.')
+    } else {
+      await addDoc(collection(db, 'readers'), { ...reader, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+      resetReaderForm()
+      toast('Leitor cadastrado com sucesso.')
+    }
+  } catch (err) { error(err, 'Não foi possível salvar o leitor.') } finally { loading(button, false) }
+}
+async function removeBook(id) {
+  if (state.loans.some((loan) => loan.bookId === id && loan.status === 'active')) return toast('Não é possível apagar um livro com empréstimo ativo.', 'error')
+  if (!confirm('Apagar este livro do acervo?')) return
+  try { await deleteDoc(doc(db, 'books', id)); toast('Livro apagado.') } catch (err) { error(err, 'Não foi possível apagar o livro.') }
+}
+async function removeReader(id) {
+  if (state.loans.some((loan) => loan.readerId === id && loan.status === 'active')) return toast('Não é possível apagar um leitor com empréstimo ativo.', 'error')
+  if (!confirm('Apagar este leitor?')) return
+  try { await deleteDoc(doc(db, 'readers', id)); toast('Leitor apagado.') } catch (err) { error(err, 'Não foi possível apagar o leitor.') }
+}
 async function registerLoan() { const button = $('#registerLoanBtn'), code = $('#bookCodeInput').value.trim().toUpperCase(), text = $('#readerInput').value.trim(), selectedReaderId = $('#readerSelectInput').value, days = Number($('#loanDays').value), book = state.books.find((b) => b.code?.toUpperCase() === code), reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text.toLowerCase()); if (!book || !reader) return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error'); loading(button, true, 'Registrando…'); try { await runTransaction(db, async (tx) => { const bookRef = doc(db, 'books', book.id), snap = await tx.get(bookRef); if (!snap.exists() || Number(snap.data().available || 0) < 1) throw new Error('indisponível'); const free = Number(snap.data().available || 0) - 1, due = new Date(); due.setDate(due.getDate() + days); tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp() }); tx.set(doc(collection(db, 'loans')), { schoolId: config.currentSchoolId, bookId: book.id, bookCode: book.code, bookTitle: book.title, readerId: reader.id, readerName: reader.name, readerCourse: reader.course || 'Não se aplica', days, dueAt: Timestamp.fromDate(due), status: 'active', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }) }); $('#bookCodeInput').value = ''; $('#readerInput').value = ''; $('#readerSelectInput').value = ''; toast('Empréstimo registrado.') } catch (err) { error(err, err.message === 'indisponível' ? 'Livro indisponível.' : 'Não foi possível registrar o empréstimo.') } finally { loading(button, false) } }
 async function returnLoan(id) { try { await runTransaction(db, async (tx) => { const loanRef = doc(db, 'loans', id), loan = await tx.get(loanRef); if (!loan.exists() || loan.data().status !== 'active') throw new Error('inválido'); const bookRef = doc(db, 'books', loan.data().bookId), book = await tx.get(bookRef); tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp() }); if (book.exists()) { const free = Math.min(Number(book.data().available || 0) + 1, Number(book.data().total || 0)); tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp() }) } }); toast('Livro devolvido.') } catch (err) { error(err, 'Não foi possível registrar a devolução.') } }
 async function renewLoan(id) {
@@ -275,6 +355,57 @@ async function renewLoan(id) {
 }
 function notify(id) { const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); if (!loan) return; $('#notificationContact').textContent = `${reader?.email || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a ${config.schoolName}.`; const modalEl = $('#notificationModal'); modalEl.dataset.loanId = String(id); modal('notificationModal', true) }
 
+let qrScannerStream = null
+let qrScanFrame = null
+
+function stopQrScanner() {
+  if (qrScanFrame) cancelAnimationFrame(qrScanFrame)
+  qrScanFrame = null
+  qrScannerStream?.getTracks().forEach((track) => track.stop())
+  qrScannerStream = null
+  const video = $('#qrScannerVideo')
+  if (video) {
+    video.pause()
+    video.srcObject = null
+  }
+}
+
+async function startQrScanner() {
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return toast('Seu navegador não oferece leitura de QR code. Digite o ID do livro.', 'error')
+  const video = $('#qrScannerVideo')
+  const status = $('#qrScannerStatus')
+  modal('qrScannerModal', true)
+  try {
+    qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+    video.srcObject = qrScannerStream
+    await video.play()
+    status.textContent = 'Aponte a câmera para o código do livro.'
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
+    const scan = async () => {
+      if (!qrScannerStream) return
+      try {
+        const codes = await detector.detect(video)
+        const code = codes.find((item) => item.rawValue)?.rawValue
+        if (code) {
+          $('#bookCodeInput').value = code.trim().toUpperCase()
+          stopQrScanner()
+          modal('qrScannerModal', false)
+          toast('ID do livro preenchido pelo QR code.')
+          return
+        }
+      } catch (err) {
+        console.warn('Não foi possível ler o QR code:', err)
+      }
+      qrScanFrame = requestAnimationFrame(scan)
+    }
+    scan()
+  } catch (err) {
+    stopQrScanner()
+    modal('qrScannerModal', false)
+    toast(err?.name === 'NotAllowedError' ? 'Permita o acesso à câmera para escanear o livro.' : 'Não foi possível abrir a câmera.', 'error')
+  }
+}
+
 function normalizePhone(phone = '') {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -287,12 +418,11 @@ function openWhatsAppMessage(reader, message) {
   return true
 }
 
-async function sendEmailNotification(reader, message, loan) {
-  const email = String(reader?.email || '').trim()
+async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
+  const email = String(recipient?.email || '').trim()
   if (!email) return false
   const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
   const serviceId = config.emailjs.serviceId
-  const templateId = config.emailjs.templateId
   const publicKey = config.emailjs.publicKey
   const dueDate = loan ? formatDate(loan.dueAt) : '—'
 
@@ -305,7 +435,7 @@ async function sendEmailNotification(reader, message, loan) {
     window.emailjs.init({ publicKey })
     await window.emailjs.send(serviceId, templateId, {
       to_email: email,
-      to_name: reader?.name || 'Leitor',
+      to_name: recipient?.name || reader?.name || 'Leitor',
       subject: 'Aviso de biblioteca',
       message,
       organization: config.organizationName,
@@ -315,8 +445,7 @@ async function sendEmailNotification(reader, message, loan) {
       livro: loan?.bookTitle || '',
       loan_days: Number(loan?.days || 0),
       data_vencimento: dueDate,
-      date: dueDate,
-      message
+      date: dueDate
     })
     return true
   } catch (error) {
@@ -334,6 +463,17 @@ async function triggerNotification(type) {
   const message = $('#notificationMessage').value.trim()
   if (!loan || !reader || !message) return toast('Não foi possível enviar a notificação.', 'error')
 
+  if (type === 'coordination') {
+    if (!config.coordinationEmail) return toast('Cadastre o e-mail da coordenação na escola.', 'error')
+    const coordination = { name: 'Coordenação', email: config.coordinationEmail }
+    const coordinationMessage = `Olá, coordenação. O empréstimo de "${loan.bookTitle}" para ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}. Favor verificar com o aluno.`
+    const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId)
+    if (!sent) return toast('Não foi possível enviar o aviso à coordenação.', 'error')
+    toast('Aviso enviado ou preparado para a coordenação.')
+    modal('notificationModal', false)
+    return
+  }
+
   if (type === 'whatsapp') {
     const sent = openWhatsAppMessage(reader, message)
     if (!sent) return toast('Este leitor não possui telefone para WhatsApp.', 'error')
@@ -342,7 +482,7 @@ async function triggerNotification(type) {
     return
   }
 
-  const sent = await sendEmailNotification(reader, message, loan)
+  const sent = await sendEmailNotification(reader, message, loan, reader, config.emailjs.studentTemplateId)
   if (!sent) return toast('Este leitor não possui e-mail para envio.', 'error')
   toast('E-mail enviado ou preparado para envio.')
   modal('notificationModal', false)
@@ -351,7 +491,7 @@ function exportCsv() { const rows = [['Código', 'Título', 'Autor', 'Categoria'
 function exportXlsx() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])]; const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
 function subscribeBooks() {
   if (!canUseFirebase || !db) return
-  state.unsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
+  state.publicUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
     state.books = snap.docs.map((d) => {
       const data = d.data()
       const total = Number(data.total || 0)
@@ -363,7 +503,7 @@ function subscribeBooks() {
 }
 function subscribeCategories() {
   if (!canUseFirebase || !db) return
-  state.unsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
+  state.publicUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
     state.categories = snap.docs.map((d) => ({ id: d.data().id || d.id, ...d.data() }))
     renderCategories();
     renderCategorySelect();
@@ -373,17 +513,17 @@ function subscribeCategories() {
     renderDashboard();
   }, (err) => error(err)))
 }
-function clearAdminSubscriptions() { while (state.unsubs.length > 1) state.unsubs.pop()() }
+function clearPublicSubscriptions() { while (state.publicUnsubs.length) state.publicUnsubs.pop()() }
+function clearAdminSubscriptions() { while (state.adminUnsubs.length) state.adminUnsubs.pop()() }
 function subscribeAdmin() {
   if (!canUseFirebase || !db || !auth) return
   clearAdminSubscriptions();
   const activeSchoolId = config.currentSchoolId
-  state.unsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => { state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderReaders(); renderDashboard() }, (err) => error(err)));
-  state.unsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => { state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderLoans(); renderDashboard() }, (err) => error(err)))
-  subscribeCategories()
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => { state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderReaders(); renderDashboard() }, (err) => error(err)));
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => { state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderLoans(); renderDashboard() }, (err) => error(err)))
 }
 function view(name) { $('#publicView').classList.toggle('is-active', name === 'public'); $('#adminView').classList.toggle('is-active', name === 'admin'); $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name)) }
-function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = () => toast('Leitura por câmera indisponível. Digite o ID do livro.', 'error'); $('#addBookBtn').onclick = () => openForm('acervo', '#bookFormPanel', '#bookTitleInput'); $('#addReaderBtn').onclick = () => openForm('leitores', '#readerFormPanel', '#readerNameInput'); $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => modal(b.dataset.close, false)); $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
+function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = startQrScanner; $('#addBookBtn').onclick = () => { resetBookForm(); openForm('acervo', '#bookFormPanel', '#bookTitleInput') }; $('#addReaderBtn').onclick = () => { resetReaderForm(); openForm('leitores', '#readerFormPanel', '#readerNameInput') }; $('#cancelBookEditBtn').onclick = resetBookForm; $('#cancelReaderEditBtn').onclick = resetReaderForm; $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) }); $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
   if (!canUseFirebase || !auth) {
     state.user = null;
     $('#logoutBtn').classList.add('hidden');
@@ -394,6 +534,7 @@ function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.vie
   try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
 };
 }
+$('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 $('#loginForm').onsubmit = async (x) => {
   x.preventDefault();
   const email = $('#loginForm input[type="email"]').value.trim();
@@ -419,7 +560,7 @@ $('#loginForm').onsubmit = async (x) => {
 
   try { await signInWithEmailAndPassword(auth, email, password); modal('loginModal', false) } catch (err) { error(err) } finally { loading(b, false) }
 };
-$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { const methods = await fetchSignInMethodsForEmail(auth, email); if (!methods || !methods.length) return toast('Este e-mail não está cadastrado no sistema.', 'error'); await sendPasswordResetEmail(auth, email); toast('E-mail de recuperação enviado.') } catch (err) { if (err?.code === 'auth/user-not-found') return toast('Este e-mail não está cadastrado no sistema.', 'error'); error(err, 'Não foi possível enviar a recuperação.') } }
+$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { await sendPasswordResetEmail(auth, email); toast('Se este e-mail pertencer a um administrador cadastrado, o link de recuperação foi enviado.') } catch (err) { error(err, 'Não foi possível enviar a recuperação.') } }
 async function init() {
   setup();
   updateReaderFields();
@@ -431,6 +572,7 @@ async function init() {
     view('public');
     return
   }
+  await ensureCurrentSchoolId();
   renderCategorySelect();
   renderCategoryList();
   renderPublicBooks();
@@ -449,12 +591,27 @@ async function init() {
     state.user = user;
     $('#logoutBtn').classList.toggle('hidden', !user);
     if (user) {
-      await resolveUserSchool(user);
-      clearAdminSubscriptions();
-      subscribeBooks();
+      const schoolBeforeProfile = config.currentSchoolId;
+      state.profile = await resolveUserSchool(user);
+      if (state.profile?.role !== 'admin') {
+        state.profile = null;
+        state.user = null;
+        toast('Esta conta não possui acesso administrativo.', 'error');
+        await signOut(auth);
+        return
+      }
+      if (schoolBeforeProfile !== config.currentSchoolId) {
+        clearPublicSubscriptions();
+        subscribeBooks();
+        subscribeCategories();
+      }
       subscribeAdmin();
     } else {
       clearAdminSubscriptions();
+      clearPublicSubscriptions();
+      subscribeBooks();
+      subscribeCategories();
+      state.profile = null;
       state.readers = [];
       state.loans = [];
       renderReaders();

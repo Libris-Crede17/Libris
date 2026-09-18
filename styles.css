@@ -938,6 +938,16 @@ td {
   width: min(92vw, 420px);
 }
 
+.qr-scanner-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-top: 1rem;
+  border-radius: 0.9rem;
+  background: #101928;
+  object-fit: cover;
+}
+
 .modal-close {
   position: absolute;
   right: 0.9rem;

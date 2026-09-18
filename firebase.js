@@ -4,8 +4,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
-  sendPasswordResetEmail,
-  fetchSignInMethodsForEmail
+  sendPasswordResetEmail
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'
 import {
   getFirestore,
@@ -53,7 +52,6 @@ export {
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
-  fetchSignInMethodsForEmail,
   collection,
   doc,
   getDoc,
