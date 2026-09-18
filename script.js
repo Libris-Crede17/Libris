@@ -1,22 +1,13 @@
-import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, serverTimestamp, Timestamp } from './firebase.js'
+import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, fetchSignInMethodsForEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, serverTimestamp, Timestamp } from './firebase.js'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
 const config = { organizationName: 'Libris', currentSchoolId: 'escola-padrao', schoolName: 'Biblioteca escolar', emailjs: { serviceId: 'service_vpiw60w', templateId: 'template_s1sr3xs', publicKey: 'FS9fOYvVSD-vMtAWs' } }
 const demoAdmin = { email: 'admin@teste.com', password: '123456' }
 const defaultCategories = [ ]
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
-const fallbackBooks = [
-  { id: 'demo-1', code: '01-0042', title: 'Dom Casmurro', author: 'Machado de Assis', categoryId: '01', available: 2, total: 3, year: 1899, shelf: 'Estante 2 · Prateleira B', synopsis: 'Clássico da literatura brasileira.', status: 'disponivel' },
-  { id: 'demo-2', code: '03-0007', title: 'Cálculo Volume 1', author: 'James Stewart', categoryId: '03', available: 1, total: 4, year: 2016, shelf: 'Estante 4 · Prateleira A', synopsis: 'Livro de matemática para apoio escolar.', status: 'disponivel' },
-  { id: 'demo-3', code: '05-0088', title: 'Biologia das Plantas', author: 'Raven & Evert', categoryId: '05', available: 0, total: 2, year: 2014, shelf: 'Estante 5 · Prateleira B', synopsis: 'Material de ciências e agronegócio.', status: 'emprestado' }
-]
-const fallbackReaders = [
-  { id: 'demo-r1', name: 'Maria Rocha', type: 'Aluno', course: 'Informática · 2026', matricula: '2026001', cpf: '', email: 'maria@escola.edu.br', phone: '(88) 99999-1010' },
-  { id: 'demo-r2', name: 'João Souza', type: 'Professor', course: 'Ensino Médio', matricula: '', cpf: '123.456.789-00', email: 'joao@escola.edu.br', phone: '(88) 98888-2020' }
-]
-const fallbackLoans = [
-  { id: 'demo-l1', bookId: 'demo-3', bookCode: '05-0088', bookTitle: 'Biologia das Plantas', readerId: 'demo-r1', readerName: 'Maria Rocha', readerCourse: 'Informática · 2026', days: 7, dueAt: new Date(Date.now() + 86400000 * 3), status: 'active' }
-]
+const fallbackBooks = [ ]
+const fallbackReaders = [ ]
+const fallbackLoans = [ ]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
 const state = { user: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', unsubs: [] }
 
@@ -438,7 +429,7 @@ $('#loginForm').onsubmit = async (x) => {
 
   try { await signInWithEmailAndPassword(auth, email, password); modal('loginModal', false) } catch (err) { error(err) } finally { loading(b, false) }
 };
-$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { await sendPasswordResetEmail(auth, email); toast('E-mail de recuperação enviado.') } catch (err) { error(err, 'Não foi possível enviar a recuperação.') } }; const drop = $('#dropzone'), input = $('#csvInput'), read = async (f) => { if (!f) return; const ext = f.name.split('.').pop().toLowerCase(); if (!['csv', 'xlsx', 'xls'].includes(ext)) return toast('Selecione um arquivo CSV ou Excel.', 'error'); try { state.csv = await readImportedRows(f); renderCsv(); toast(ext === 'csv' ? 'Arquivo CSV importado.' : 'Arquivo Excel importado.') } catch (err) { error(err, 'Não foi possível ler o arquivo de importação.') } }; $('#browseCsvBtn').onclick = () => input.click(); input.onchange = (x) => read(x.target.files[0]); ['dragenter', 'dragover'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.add('dragover') })); ['dragleave', 'drop'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.remove('dragover') })); drop.ondrop = (x) => read(x.dataTransfer.files[0]) }
+$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { const methods = await fetchSignInMethodsForEmail(auth, email); if (!methods || !methods.length) return toast('Este e-mail não está cadastrado no sistema.', 'error'); await sendPasswordResetEmail(auth, email); toast('E-mail de recuperação enviado.') } catch (err) { if (err?.code === 'auth/user-not-found') return toast('Este e-mail não está cadastrado no sistema.', 'error'); error(err, 'Não foi possível enviar a recuperação.') } }; const drop = $('#dropzone'), input = $('#csvInput'), read = async (f) => { if (!f) return; const ext = f.name.split('.').pop().toLowerCase(); if (!['csv', 'xlsx', 'xls'].includes(ext)) return toast('Selecione um arquivo CSV ou Excel.', 'error'); try { state.csv = await readImportedRows(f); renderCsv(); toast(ext === 'csv' ? 'Arquivo CSV importado.' : 'Arquivo Excel importado.') } catch (err) { error(err, 'Não foi possível ler o arquivo de importação.') } }; $('#browseCsvBtn').onclick = () => input.click(); input.onchange = (x) => read(x.target.files[0]); ['dragenter', 'dragover'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.add('dragover') })); ['dragleave', 'drop'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.remove('dragover') })); drop.ondrop = (x) => read(x.dataTransfer.files[0]) }
 async function init() {
   setup();
   updateReaderFields();
