@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Libris</title>
+    <link rel="icon" type="image/png" href="Librissf.png" />
+    <meta
+      name="description"
+      content="Sistema escolar de biblioteca Libris."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="Libris">
+          <div class="brand-mark" aria-label="Logo Libris"></div>
+          <div>
+            <p class="brand-title">Libris</p>
+            <p class="brand-subtitle">Biblioteca escolar</p>
+          </div>
+        </div>
+
+        <nav class="main-nav" aria-label="Navegação principal">
+          <button class="nav-btn is-active" data-view="public" type="button">
+            Acervo Público
+          </button>
+          <button class="nav-btn" data-view="admin" type="button">
+            Painel Admin
+          </button>
+        </nav>
+        <button class="btn btn-secondary hidden" id="logoutBtn" type="button">Sair</button>
+      </header>
+
+      <main class="main-content">
+        <section id="publicView" class="view is-active">
+          <div class="hero-panel">
+            <div class="eyebrow">Acervo aberto à comunidade escolar</div>
+            <h1>Explore o acervo da biblioteca e encontre seu próximo livro</h1>
+            <p>
+              Pesquise por título, categoria ou código do livro, filtre por
+              disponibilidade e confira a localização física dos exemplares.
+            </p>
+
+            <div class="search-row">
+              <div class="search-input-wrap">
+                <span class="icon">⌕</span>
+                <input
+                  id="searchInput"
+                  type="search"
+                  placeholder="Buscar por título, categoria ou código…"
+                  aria-label="Buscar livros"
+                />
+              </div>
+
+              <div class="toggle-group" aria-label="Filtrar por disponibilidade">
+                <button class="filter-btn is-active" data-status="all" type="button">Todos</button>
+                <button class="filter-btn" data-status="disponivel" type="button">Disponíveis</button>
+                <button class="filter-btn" data-status="emprestado" type="button">Emprestados</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="category-header">
+            <span>Categoria:</span>
+            <div id="categoryFilters" class="category-filters"></div>
+          </div>
+
+          <div id="resultsMeta" class="results-meta"></div>
+          <div id="bookGrid" class="book-grid"></div>
+        </section>
+
+        <section id="adminView" class="view">
+          <div class="admin-header">
+            <div>
+              <p class="eyebrow">Menu Administrativo</p>
+              <h2>Gestão da biblioteca escolar</h2>
+              <p class="eyebrow" id="schoolName" style="margin-top:0.4rem; background:rgba(52,160,96,0.08);">Biblioteca escolar</p>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-secondary" id="exportBtn" type="button">Exportar CSV</button>
+              <button class="btn btn-secondary" id="exportXlsxBtn" type="button">Exportar XLSX</button>
+            </div>
+          </div>
+
+          <div id="kpiGrid" class="kpi-grid"></div>
+
+          <div class="dashboard-grid">
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top 5 Gêneros</h3>
+              </div>
+              <div class="bar-chart compact" id="genreChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Status do Acervo</h3>
+              </div>
+              <div class="donut-wrap" id="statusDonut"></div>
+              <div class="status-legend" id="statusLegend"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por Curso/Turma</h3>
+              </div>
+              <div class="bar-chart" id="courseChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top Leitores</h3>
+              </div>
+              <div class="list-chart" id="readerChart"></div>
+            </div>
+          </div>
+
+          <div class="admin-tabs">
+            <div class="tab-buttons">
+              <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
+              <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
+              <button class="tab-btn" data-tab="leitores" type="button">Leitores</button>
+              <button class="tab-btn" data-tab="importacao" type="button">Importação CSV</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="checkout">
+              <div class="checkout-form panel">
+                <h3>Registrar empréstimo</h3>
+                <div class="form-grid">
+                  <label>
+                    <span>ID do livro</span>
+                    <div class="input-row">
+                      <input id="bookCodeInput" type="text" placeholder="Ex: 01-0042" />
+                      <button type="button" class="btn btn-ghost" id="scanBtn">Escanear QR code</button>
+                    </div>
+                  </label>
+                  <label>
+                    <span>Leitor</span>
+                    <input id="readerInput" type="text" placeholder="Matrícula ou Nome" />
+                  </label>
+                  <label>
+                    <span>Selecionar aluno cadastrado</span>
+                    <select id="readerSelectInput">
+                      <option value="">Selecione um leitor</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Prazo</span>
+                    <select id="loanDays">
+                      <option value="7">7 dias</option>
+                      <option value="14">14 dias</option>
+                      <option value="21">21 dias</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
+              </div>
+
+              <div class="mt-24 panel">
+                <div class="panel-head">
+                  <h3>Empréstimos ativos</h3>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Livro</th>
+                        <th>Leitor</th>
+                        <th>Prazo</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="loansTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="acervo">
+              <div class="panel panel-header-actions">
+                <div class="panel-head">
+                  <h3>Acervo</h3>
+                </div>
+                <button class="btn btn-primary" type="button" id="addBookBtn">Adicionar Novo Livro</button>
+              </div>
+
+              <div class="inline-form-panel panel mt-24 hidden" id="bookFormPanel">
+                <div class="panel-head">
+                  <h3>Cadastrar livro</h3>
+                </div>
+
+                <form id="bookForm" class="form-grid">
+                  <label>
+                    <span>Título</span>
+                    <input id="bookTitleInput" type="text" placeholder="Ex: A Revolução dos Bichos" required />
+                  </label>
+                  <label>
+                    <span>Autor</span>
+                    <input id="bookAuthorInput" type="text" placeholder="Ex: George Orwell" required />
+                  </label>
+                  <label>
+                    <span>Editora</span>
+                    <input id="bookPublisherInput" type="text" placeholder="Ex: Companhia das Letras" />
+                  </label>
+                  <label>
+                    <span>Categoria</span>
+                    <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
+                  </label>
+                  <label>
+                    <span>Ano</span>
+                    <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
+                  </label>
+                  <label>
+                    <span>Status</span>
+                    <select id="bookStatusInput">
+                      <option value="disponivel">Disponível</option>
+                      <option value="emprestado">Emprestado</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Localização</span>
+                    <input id="bookShelfInput" type="text" placeholder="Ex: Estante 3 · Prateleira A" />
+                  </label>
+                  <label>
+                    <span>Quantidade de exemplares</span>
+                    <input id="bookQuantityInput" type="number" min="1" value="1" required />
+                  </label>
+                  <label>
+                    <span>Número de tombamento</span>
+                    <input id="bookTombamentoInput" type="text" />
+                  </label>
+                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
+                    <button class="btn btn-primary" type="submit">Salvar livro</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="panel mt-24">
+                <div class="panel-head">
+                  <h3>Categorias</h3>
+                </div>
+
+                <form id="categoryForm" class="form-grid">
+                  <label>
+                    <span>Nome da categoria</span>
+                    <input id="categoryNameInput" type="text" placeholder="Ex: Ficção científica" required />
+                  </label>
+                  <label>
+                    <span>Código</span>
+                    <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
+                  </label>
+                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
+                    <button class="btn btn-primary" type="submit">Salvar categoria</button>
+                  </div>
+                </form>
+
+                <div class="mt-24" id="categoryList"></div>
+              </div>
+
+              <div class="mt-24 panel">
+                <label>
+                  <span>Buscar no acervo</span>
+                  <input id="acervoSearchInput" type="search" placeholder="Nome do livro, autor ou código" />
+                </label>
+              </div>
+
+              <div class="table-wrap mt-24">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Título</th>
+                      <th>Categoria</th>
+                      <th>Tombamento</th>
+                      <th>Quantidade</th>
+                      <th>Localização</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bookTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="leitores">
+              <div class="panel panel-header-actions">
+                <div class="panel-head">
+                  <h3>Leitores</h3>
+                </div>
+                <button class="btn btn-primary" type="button" id="addReaderBtn">Adicionar Novo Leitor</button>
+              </div>
+
+                <div class="inline-form-panel panel mt-24 hidden" id="readerFormPanel">
+                  <div class="panel-head">
+                    <h3>Cadastrar leitor</h3>
+                  </div>
+
+                  <form id="readerForm" class="form-grid">
+                    <label>
+                      <span>Nome completo</span>
+                      <input id="readerNameInput" type="text" placeholder="Ex: Ana Souza" required />
+                    </label>
+                    <label>
+                      <span>Tipo</span>
+                      <select id="readerTypeInput">
+                        <option value="Aluno">Aluno</option>
+                        <option value="Professor">Professor</option>
+                        <option value="Outros">Outros</option>
+                      </select>
+                    </label>
+                    <label id="readerCourseField">
+                      <span>Curso / Turma</span>
+                      <input id="readerCourseInput" type="text" placeholder="Ex: Informática · 2026" required />
+                    </label>
+                    <label id="readerRegistrationField">
+                      <span>Matrícula</span>
+                      <input id="readerRegistrationInput" type="text" placeholder="Ex: 202600123" required />
+                    </label>
+                    <label id="readerCpfField" class="hidden">
+                      <span>CPF</span>
+                      <input id="readerCpfInput" type="text" inputmode="numeric" placeholder="Ex: 000.000.000-00" />
+                    </label>
+                    <label>
+                      <span>E-mail</span>
+                      <input id="readerEmailInput" type="email" placeholder="Ex: ana@escola.edu.br" required />
+                    </label>
+                    <label>
+                      <span>Telefone</span>
+                      <input id="readerPhoneInput" type="tel" placeholder="Ex: (88) 99999-9999" required />
+                    </label>
+                    <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
+                      <button class="btn btn-primary" type="submit">Salvar leitor</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="mt-24">
+                  <label>
+                    <span>Buscar leitor</span>
+                    <input id="readerSearchInput" type="search" placeholder="Nome, tipo ou ano" />
+                  </label>
+                </div>
+
+                <div class="table-wrap mt-24">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Nome</th>
+                        <th>Tipo</th>
+                        <th>Curso / Turma / Ano</th>
+                        <th>Matrícula / CPF</th>
+                        <th>Contato</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="readersTableBody"></tbody>
+                  </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="importacao">
+              <div class="panel">
+                <div class="panel-head">
+                  <h3>Importação CSV</h3>
+                </div>
+
+                <div class="dropzone" id="dropzone">
+                  <input id="csvInput" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+                  <div class="dropzone-content">
+                    <div class="drop-icon">⇪</div>
+                    <p>Arraste e solte a planilha ou clique para selecionar</p>
+                    <button class="btn btn-secondary" type="button" id="browseCsvBtn">Selecionar arquivo</button>
+                  </div>
+                </div>
+
+                <div class="table-wrap mt-24">
+                  <table>
+                    <thead id="csvTableHead"></thead>
+                    <tbody id="csvTableBody"></tbody>
+                  </table>
+                </div>
+                <div class="action-row mt-24">
+                  <button class="btn btn-primary" type="button" id="confirmCsvBtn" disabled>Confirmar importação</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal hidden" id="bookModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="bookModal"></div>
+      <div class="modal-card">
+        <button class="modal-close" type="button" data-close="bookModal">×</button>
+        <div class="book-modal-content" id="bookModalContent"></div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="loginModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="loginModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="loginModal">×</button>
+        <div class="login-header">
+          <div class="brand-mark accent">📚</div>
+          <h3>Acesso administrativo</h3>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>E-mail</span>
+            <input type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>Senha</span>
+            <input type="password" autocomplete="current-password" required />
+          </label>
+          <button class="btn btn-primary" type="submit">Entrar no painel</button>
+          <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="notificationModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="notificationModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="notificationModal">×</button>
+        <h3>Notificar leitor</h3>
+        <p id="notificationContact"></p>
+        <label><span>Mensagem sugerida</span><textarea id="notificationMessage" rows="5"></textarea></label>
+        <div style="display:flex; flex-wrap:wrap; gap:0.65rem; margin-top:0.8rem;">
+          <button class="btn btn-primary" type="button" id="copyNotificationBtn">Copiar mensagem</button>
+          <button class="btn btn-ghost" type="button" id="sendWhatsappBtn">Enviar por WhatsApp</button>
+          <button class="btn btn-secondary" type="button" id="sendEmailBtn">Enviar por e-mail</button>
+        </div>
+      </div>
+    </div>
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script type="module" src="script.js"></script>
+  </body>
+</html>
