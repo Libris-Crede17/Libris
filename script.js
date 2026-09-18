@@ -5,9 +5,18 @@ const config = { organizationName: 'Libris', currentSchoolId: 'escola-padrao', s
 const demoAdmin = { email: 'admin@teste.com', password: '123456' }
 const defaultCategories = [ ]
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
-const fallbackBooks = [ ]
-const fallbackReaders = [ ]
-const fallbackLoans = [ ]
+const fallbackBooks = [
+  { id: 'demo-1', code: '01-0042', title: 'Dom Casmurro', author: 'Machado de Assis', categoryId: '01', available: 2, total: 3, year: 1899, shelf: 'Estante 2 · Prateleira B', synopsis: 'Clássico da literatura brasileira.', status: 'disponivel' },
+  { id: 'demo-2', code: '03-0007', title: 'Cálculo Volume 1', author: 'James Stewart', categoryId: '03', available: 1, total: 4, year: 2016, shelf: 'Estante 4 · Prateleira A', synopsis: 'Livro de matemática para apoio escolar.', status: 'disponivel' },
+  { id: 'demo-3', code: '05-0088', title: 'Biologia das Plantas', author: 'Raven & Evert', categoryId: '05', available: 0, total: 2, year: 2014, shelf: 'Estante 5 · Prateleira B', synopsis: 'Material de ciências e agronegócio.', status: 'emprestado' }
+]
+const fallbackReaders = [
+  { id: 'demo-r1', name: 'Maria Rocha', type: 'Aluno', course: 'Informática · 2026', matricula: '2026001', cpf: '', email: 'maria@escola.edu.br', phone: '(88) 99999-1010' },
+  { id: 'demo-r2', name: 'João Souza', type: 'Professor', course: 'Ensino Médio', matricula: '', cpf: '123.456.789-00', email: 'joao@escola.edu.br', phone: '(88) 98888-2020' }
+]
+const fallbackLoans = [
+  { id: 'demo-l1', bookId: 'demo-3', bookCode: '05-0088', bookTitle: 'Biologia das Plantas', readerId: 'demo-r1', readerName: 'Maria Rocha', readerCourse: 'Informática · 2026', days: 7, dueAt: new Date(Date.now() + 86400000 * 3), status: 'active' }
+]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
 const state = { user: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', unsubs: [] }
 
@@ -118,7 +127,11 @@ function renderDashboard() { const active = state.loans.filter((l) => l.status =
 
 function hydrateFallbackData() {
   state.categories = [...defaultCategories]
-  state.books = fallbackBooks.map((book) => ({ ...book, status: book.available > 0 ? 'disponivel' : 'emprestado' }))
+  state.books = fallbackBooks.map((book) => {
+    const total = Number(book.total || 0)
+    const available = Number(book.available ?? total)
+    return { ...book, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
+  })
   state.readers = fallbackReaders
   state.loans = fallbackLoans.map((loan) => ({ ...loan, dueAt: loan.dueAt instanceof Date ? loan.dueAt : new Date(loan.dueAt), status: loan.status || 'active' }))
   renderCategorySelect()
@@ -370,7 +383,15 @@ function exportCsv() { const rows = [['Código', 'Título', 'Autor', 'Categoria'
 function exportXlsx() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])]; const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
 function subscribeBooks() {
   if (!canUseFirebase || !db) return
-  state.unsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => { state.books = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderPublicBooks(); renderBooks(); renderDashboard() }, (err) => error(err)))
+  state.unsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
+    state.books = snap.docs.map((d) => {
+      const data = d.data()
+      const total = Number(data.total || 0)
+      const available = Number(data.available ?? total)
+      return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
+    })
+    renderPublicBooks(); renderBooks(); renderDashboard()
+  }, (err) => error(err)))
 }
 function subscribeCategories() {
   if (!canUseFirebase || !db) return
