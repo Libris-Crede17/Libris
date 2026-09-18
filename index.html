@@ -128,7 +128,6 @@
               <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
               <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
               <button class="tab-btn" data-tab="leitores" type="button">Leitores</button>
-              <button class="tab-btn" data-tab="importacao" type="button">Importação CSV</button>
             </div>
 
             <div class="tab-panel is-active" data-panel="checkout">
@@ -368,32 +367,6 @@
               </div>
             </div>
 
-            <div class="tab-panel" data-panel="importacao">
-              <div class="panel">
-                <div class="panel-head">
-                  <h3>Importação CSV</h3>
-                </div>
-
-                <div class="dropzone" id="dropzone">
-                  <input id="csvInput" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
-                  <div class="dropzone-content">
-                    <div class="drop-icon">⇪</div>
-                    <p>Arraste e solte a planilha ou clique para selecionar</p>
-                    <button class="btn btn-secondary" type="button" id="browseCsvBtn">Selecionar arquivo</button>
-                  </div>
-                </div>
-
-                <div class="table-wrap mt-24">
-                  <table>
-                    <thead id="csvTableHead"></thead>
-                    <tbody id="csvTableBody"></tbody>
-                  </table>
-                </div>
-                <div class="action-row mt-24">
-                  <button class="btn btn-primary" type="button" id="confirmCsvBtn" disabled>Confirmar importação</button>
-                </div>
-              </div>
-            </div>
           </div>
         </section>
       </main>

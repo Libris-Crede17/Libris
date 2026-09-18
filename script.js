@@ -55,7 +55,7 @@ async function resolveUserSchool(user) {
 }
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => [...document.querySelectorAll(s)]
-const e = { grid: $('#bookGrid'), results: $('#resultsMeta'), categories: $('#categoryFilters'), books: $('#bookTableBody'), readers: $('#readersTableBody'), loans: $('#loansTableBody'), kpis: $('#kpiGrid'), genre: $('#genreChart'), course: $('#courseChart'), topReaders: $('#readerChart'), donut: $('#statusDonut'), legend: $('#statusLegend'), toast: $('#toast'), csvHead: $('#csvTableHead'), csvBody: $('#csvTableBody') }
+const e = { grid: $('#bookGrid'), results: $('#resultsMeta'), categories: $('#categoryFilters'), books: $('#bookTableBody'), readers: $('#readersTableBody'), loans: $('#loansTableBody'), kpis: $('#kpiGrid'), genre: $('#genreChart'), course: $('#courseChart'), topReaders: $('#readerChart'), donut: $('#statusDonut'), legend: $('#statusLegend'), toast: $('#toast') }
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
 const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
 const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
@@ -347,38 +347,6 @@ async function triggerNotification(type) {
   toast('E-mail enviado ou preparado para envio.')
   modal('notificationModal', false)
 }
-function parseCsv(text) { const rows = [], current = [], lines = text.replace(/\r/g, '').split('\n').filter(Boolean); for (const line of lines) { let cell = '', quote = false, row = []; for (let i = 0; i < line.length; i += 1) { const c = line[i]; if (c === '"') quote = !quote; else if ((c === ',' || c === ';') && !quote) { row.push(cell.trim()); cell = '' } else cell += c } row.push(cell.trim()); current.push(row) } if (current.length < 2) return rows; const headers = current.shift().map((h) => h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()); return current.map((row) => Object.fromEntries(headers.map((h, i) => [h, row[i] || '']))) }
-function value(row, names) { return names.map((n) => row[n]).find((v) => String(v || '').trim())?.trim() || '' }
-function normalize(row = {}) {
-  const clean = Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), value]))
-  const raw = value(clean, ['tipo']) || 'Aluno'
-  const type = ['Aluno', 'Professor', 'Outros'].includes(raw) ? raw : 'Outros'
-  return {
-    name: value(clean, ['nome', 'nome completo']),
-    type,
-    course: value(clean, ['curso', 'turma']),
-    matricula: value(clean, ['matricula', 'matriculaaluno', 'matrícula']),
-    cpf: value(clean, ['cpf']),
-    email: value(clean, ['email', 'e-mail']),
-    phone: value(clean, ['telefone', 'celular'])
-  }
-}
-function renderCsv() { e.csvHead.innerHTML = '<tr><th>Nome</th><th>Tipo</th><th>Contato</th><th>Status</th></tr>'; e.csvBody.innerHTML = state.csv.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type)}</td><td>${esc(r.email || r.phone)}</td><td>${r.name && r.email && r.phone ? 'Pronto' : 'Incompleto'}</td></tr>`).join('') || '<tr><td colspan="4">Nenhum dado válido.</td></tr>'; $('#confirmCsvBtn').disabled = !state.csv.some((r) => r.name && r.email && r.phone) }
-async function readImportedRows(file) {
-  const ext = file.name.split('.').pop().toLowerCase()
-  if (ext === 'csv') {
-    const text = await file.text()
-    return parseCsv(text).map(normalize)
-  }
-  if (ext === 'xlsx' || ext === 'xls') {
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
-    return rows.map((row) => normalize(row))
-  }
-  throw new Error('Formato de arquivo não suportado.')
-}
-async function importCsv() { const list = state.csv.filter((r) => r.name && r.email && r.phone && (r.type === 'Aluno' ? r.matricula : r.cpf)); if (!list.length) return toast('Nenhum leitor válido para importar.', 'error'); const button = $('#confirmCsvBtn'); loading(button, true, 'Importando…'); try { await Promise.all(list.map((r) => addDoc(collection(db, 'readers'), { ...r, schoolId: config.currentSchoolId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))); state.csv = []; renderCsv(); toast(`${list.length} leitor(es) importado(s).`) } catch (err) { error(err, 'Não foi possível importar o CSV.') } finally { loading(button, false) } }
 function exportCsv() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])], csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
 function exportXlsx() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])]; const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
 function subscribeBooks() {
@@ -415,7 +383,7 @@ function subscribeAdmin() {
   subscribeCategories()
 }
 function view(name) { $('#publicView').classList.toggle('is-active', name === 'public'); $('#adminView').classList.toggle('is-active', name === 'admin'); $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name)) }
-function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = () => toast('Leitura por câmera indisponível. Digite o ID do livro.', 'error'); $('#addBookBtn').onclick = () => openForm('acervo', '#bookFormPanel', '#bookTitleInput'); $('#addReaderBtn').onclick = () => openForm('leitores', '#readerFormPanel', '#readerNameInput'); $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $('#confirmCsvBtn').onclick = importCsv; $$('.modal [data-close]').forEach((b) => b.onclick = () => modal(b.dataset.close, false)); $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
+function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = () => toast('Leitura por câmera indisponível. Digite o ID do livro.', 'error'); $('#addBookBtn').onclick = () => openForm('acervo', '#bookFormPanel', '#bookTitleInput'); $('#addReaderBtn').onclick = () => openForm('leitores', '#readerFormPanel', '#readerNameInput'); $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => modal(b.dataset.close, false)); $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
   if (!canUseFirebase || !auth) {
     state.user = null;
     $('#logoutBtn').classList.add('hidden');
@@ -425,6 +393,7 @@ function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.vie
   }
   try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
 };
+}
 $('#loginForm').onsubmit = async (x) => {
   x.preventDefault();
   const email = $('#loginForm input[type="email"]').value.trim();
@@ -450,7 +419,7 @@ $('#loginForm').onsubmit = async (x) => {
 
   try { await signInWithEmailAndPassword(auth, email, password); modal('loginModal', false) } catch (err) { error(err) } finally { loading(b, false) }
 };
-$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { const methods = await fetchSignInMethodsForEmail(auth, email); if (!methods || !methods.length) return toast('Este e-mail não está cadastrado no sistema.', 'error'); await sendPasswordResetEmail(auth, email); toast('E-mail de recuperação enviado.') } catch (err) { if (err?.code === 'auth/user-not-found') return toast('Este e-mail não está cadastrado no sistema.', 'error'); error(err, 'Não foi possível enviar a recuperação.') } }; const drop = $('#dropzone'), input = $('#csvInput'), read = async (f) => { if (!f) return; const ext = f.name.split('.').pop().toLowerCase(); if (!['csv', 'xlsx', 'xls'].includes(ext)) return toast('Selecione um arquivo CSV ou Excel.', 'error'); try { state.csv = await readImportedRows(f); renderCsv(); toast(ext === 'csv' ? 'Arquivo CSV importado.' : 'Arquivo Excel importado.') } catch (err) { error(err, 'Não foi possível ler o arquivo de importação.') } }; $('#browseCsvBtn').onclick = () => input.click(); input.onchange = (x) => read(x.target.files[0]); ['dragenter', 'dragover'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.add('dragover') })); ['dragleave', 'drop'].forEach((n) => drop.addEventListener(n, (x) => { x.preventDefault(); drop.classList.remove('dragover') })); drop.ondrop = (x) => read(x.dataTransfer.files[0]) }
+$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { const methods = await fetchSignInMethodsForEmail(auth, email); if (!methods || !methods.length) return toast('Este e-mail não está cadastrado no sistema.', 'error'); await sendPasswordResetEmail(auth, email); toast('E-mail de recuperação enviado.') } catch (err) { if (err?.code === 'auth/user-not-found') return toast('Este e-mail não está cadastrado no sistema.', 'error'); error(err, 'Não foi possível enviar a recuperação.') } }
 async function init() {
   setup();
   updateReaderFields();
