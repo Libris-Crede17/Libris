@@ -38,8 +38,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
 
 async function resolveUserSchool(user) {
   if (!canUseFirebase || !db || !user) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
+    await ensureCurrentSchoolId()
     const schoolNameNode = $('#schoolName')
     if (schoolNameNode) schoolNameNode.textContent = config.schoolName
     return
@@ -49,8 +48,35 @@ async function resolveUserSchool(user) {
     const userDoc = await getDoc(doc(db, 'users', user.uid))
     const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
     await loadSchoolData(schoolId)
+    await ensureCurrentSchoolId()
   } catch (err) {
     error(err, 'Não foi possível recuperar a escola deste usuário.')
+  }
+}
+
+async function ensureCurrentSchoolId() {
+  if (!canUseFirebase || !db) return
+
+  try {
+    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
+    if (schoolDoc.exists()) {
+      if (schoolDoc.data().name) config.schoolName = schoolDoc.data().name
+      return
+    }
+
+    const schoolsSnap = await getDocs(collection(db, 'schools'))
+    if (!schoolsSnap.empty) {
+      const firstSchool = schoolsSnap.docs[0]
+      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
+      config.currentSchoolId = firstSchoolId
+      if (firstSchool.data().name) config.schoolName = firstSchool.data().name
+    } else {
+      config.currentSchoolId = 'escola-padrao'
+      config.schoolName = 'Biblioteca escolar'
+    }
+  } catch (err) {
+    config.currentSchoolId = 'escola-padrao'
+    config.schoolName = 'Biblioteca escolar'
   }
 }
 const $ = (s) => document.querySelector(s)
@@ -431,6 +457,7 @@ async function init() {
     view('public');
     return
   }
+  await ensureCurrentSchoolId();
   renderCategorySelect();
   renderCategoryList();
   renderPublicBooks();

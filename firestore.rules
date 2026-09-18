@@ -1,28 +1,54 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /books/{bookId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    function signedIn() {
+      return request.auth != null;
     }
-    match /categories/{categoryId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+
+    function currentUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid))
+        : null;
     }
-    match /readers/{readerId} {
-      allow read, write: if request.auth != null;
+
+    function isOwnerOrSameSchool(schoolId) {
+      return signedIn() && currentUserDoc() != null && currentUserDoc().data.schoolId == schoolId;
     }
-    match /loans/{loanId} {
-      allow read, write: if request.auth != null;
-    }
+
     match /schools/{schoolId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && currentUserDoc() != null && currentUserDoc().data.schoolId == schoolId;
     }
+
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedIn() && (request.auth.uid == userId || currentUserDoc().data.schoolId == resource.data.schoolId);
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if signedIn() && request.auth.uid == userId;
       allow delete: if false;
+    }
+
+    match /books/{bookId} {
+      allow read: if signedIn() && isOwnerOrSameSchool(resource.data.schoolId);
+      allow create: if signedIn() && currentUserDoc() != null && request.resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow update, delete: if signedIn() && currentUserDoc() != null && resource.data.schoolId == currentUserDoc().data.schoolId;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if signedIn() && isOwnerOrSameSchool(resource.data.schoolId);
+      allow create: if signedIn() && currentUserDoc() != null && request.resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow update, delete: if signedIn() && currentUserDoc() != null && resource.data.schoolId == currentUserDoc().data.schoolId;
+    }
+
+    match /readers/{readerId} {
+      allow read: if signedIn() && isOwnerOrSameSchool(resource.data.schoolId);
+      allow create: if signedIn() && currentUserDoc() != null && request.resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow update, delete: if signedIn() && currentUserDoc() != null && resource.data.schoolId == currentUserDoc().data.schoolId;
+    }
+
+    match /loans/{loanId} {
+      allow read: if signedIn() && isOwnerOrSameSchool(resource.data.schoolId);
+      allow create: if signedIn() && currentUserDoc() != null && request.resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow update, delete: if signedIn() && currentUserDoc() != null && resource.data.schoolId == currentUserDoc().data.schoolId;
     }
   }
 }
