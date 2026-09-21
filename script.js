@@ -50,10 +50,7 @@ async function resolveUserSchool(user) {
     const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
     await loadSchoolData(schoolId)
     await ensureCurrentSchoolId()
-<<<<<<< HEAD
     return userDoc.exists() ? userDoc.data() : null
-=======
->>>>>>> af5a302a4f2551b015fb9a8f556b35af12897873
   } catch (err) {
     error(err, 'Não foi possível recuperar a escola deste usuário.')
     return null
@@ -68,32 +65,6 @@ async function ensureCurrentSchoolId() {
     if (schoolDoc.exists()) {
       if (schoolDoc.data().name) config.schoolName = schoolDoc.data().name
       if (schoolDoc.data().coordinationEmail) config.coordinationEmail = schoolDoc.data().coordinationEmail
-      return
-    }
-
-    const schoolsSnap = await getDocs(collection(db, 'schools'))
-    if (!schoolsSnap.empty) {
-      const firstSchool = schoolsSnap.docs[0]
-      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
-      config.currentSchoolId = firstSchoolId
-      if (firstSchool.data().name) config.schoolName = firstSchool.data().name
-    } else {
-      config.currentSchoolId = 'escola-padrao'
-      config.schoolName = 'Biblioteca escolar'
-    }
-  } catch (err) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
-  }
-}
-
-async function ensureCurrentSchoolId() {
-  if (!canUseFirebase || !db) return
-
-  try {
-    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (schoolDoc.exists()) {
-      if (schoolDoc.data().name) config.schoolName = schoolDoc.data().name
       return
     }
 
