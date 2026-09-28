@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return signedIn() ? get(/databases/$(database)/documents/users/$(request.auth.uid)) : null;
+    }
+
+    function isAdmin() {
+      return signedIn() && currentUserDoc() != null && currentUserDoc().data.role == 'admin';
+    }
+
+    function sameSchool(schoolId) {
+      return signedIn() && currentUserDoc() != null && currentUserDoc().data.schoolId == schoolId;
+    }
+
+    function validBookStock() {
+      return request.resource.data.keys().hasAll(['title', 'author', 'schoolId', 'total', 'available'])
+        && request.resource.data.title is string
+        && request.resource.data.author is string
+        && request.resource.data.schoolId is string
+        && request.resource.data.total is int
+        && request.resource.data.total >= 1
+        && request.resource.data.available is int
+        && request.resource.data.available >= 0
+        && request.resource.data.available <= request.resource.data.total;
+    }
+
+    match /schools/{schoolId} {
+      allow read: if true;
+      allow create, update: if signedIn() && isAdmin() && sameSchool(schoolId);
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if signedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    match /books/{bookId} {
+      allow read: if true;
+      allow create: if signedIn() && isAdmin()
+        && request.resource.data.schoolId == currentUserDoc().data.schoolId
+        && validBookStock();
+      allow update: if signedIn() && isAdmin()
+        && resource.data.schoolId == currentUserDoc().data.schoolId
+        && request.resource.data.schoolId == resource.data.schoolId
+        && validBookStock();
+      allow delete: if signedIn() && isAdmin() && resource.data.schoolId == currentUserDoc().data.schoolId;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create, update: if signedIn() && isAdmin()
+        && request.resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow delete: if signedIn() && isAdmin() && resource.data.schoolId == currentUserDoc().data.schoolId;
+    }
+
+    match /readers/{readerId} {
+      allow read: if signedIn() && (isAdmin() || request.auth.uid == resource.data.guardianUid);
+      allow create, update, delete: if signedIn() && isAdmin();
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if signedIn() && (
+        request.auth.uid == resource.data.guardianUid ||
+        isAdmin() ||
+        request.auth.uid == resource.data.readerId
+      );
+      allow create: if signedIn() && (
+        request.resource.data.guardianUid == request.auth.uid || isAdmin()
+      ) && request.resource.data.status in ['pending', 'fulfilled', 'cancelled'];
+      allow update: if signedIn() && (
+        request.auth.uid == resource.data.guardianUid || isAdmin()
+      ) && request.resource.data.guardianUid == resource.data.guardianUid;
+      allow delete: if false;
+    }
+
+    match /loans/{loanId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && isAdmin()
+        && request.resource.data.schoolId == currentUserDoc().data.schoolId
+        && (!('notices' in request.resource.data) || request.resource.data.notices is map);
+      allow update: if signedIn() && isAdmin()
+        && resource.data.schoolId == currentUserDoc().data.schoolId
+        && request.resource.data.schoolId == resource.data.schoolId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['notices']);
+      allow delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if signedIn() && isAdmin();
+      allow create: if signedIn() && isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}
