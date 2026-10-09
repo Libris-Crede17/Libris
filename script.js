@@ -315,14 +315,15 @@ async function addBook(event) {
     }
 
     const counterRef = doc(db, 'counters', 'books')
-    const counterRef = doc(db, 'counters', 'books')
     await runTransaction(db, async (tx) => {
       const counterSnap = await tx.get(counterRef)
       const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
       const nextCodeNumber = lastCode + 1
       
-      const prefix = getCategoryPrefix(selectedCategory?.name)
+      const prefix = (selectedCategory?.code || selectedCategory?.id || 'GE').toUpperCase()
+     
       const numberCode = normalizeBookCode(nextCodeNumber)
+      
       const code = `${prefix}-${numberCode}`
 
       tx.set(counterRef, {
