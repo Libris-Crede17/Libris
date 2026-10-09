@@ -21,22 +21,21 @@ const fallbackLoans = [ ]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
 const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [] }
 
-function syncSchoolSettingsForm() {
+function syncSchoolSettingsForm(data = config) {
   const coordinationEmailInput = $('#coordinationEmailInput')
   const reminderDaysInput = $('#reminderDaysInput')
   const coordinationDaysInput = $('#coordinationDaysInput')
   const maxBooksStudentInput = $('#maxBooksStudentInput')
   const maxBooksTeacherInput = $('#maxBooksTeacherInput')
   const teacherLoanDaysInput = $('#teacherLoanDaysInput')
-  if (!coordinationEmailInput || !reminderDaysInput || !coordinationDaysInput) return
+  const settings = data || {}
 
-  coordinationEmailInput.value = config.coordinationEmail || ''
-  reminderDaysInput.value = String(config.reminderDays || 1)
-  coordinationDaysInput.value = String(config.coordinationDays || 7)
-
-  if (maxBooksStudentInput) maxBooksStudentInput.value = String(config.maxBooksStudent || 2)
-  if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(config.maxBooksTeacher || 35)
-  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(config.teacherLoanDays || 21)
+  if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
+  if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
+  if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
+  if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
+  if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
+  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
 async function loadSchoolData(schoolId = config.currentSchoolId) {
@@ -738,7 +737,7 @@ async function saveSchoolSettings(event) {
     config.maxBooksStudent = maxBooksStudent
     config.maxBooksTeacher = maxBooksTeacher
     config.teacherLoanDays = teacherLoanDays
-    syncSchoolSettingsForm()
+    syncSchoolSettingsForm(config)
     await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
     toast('Configurações salvas com sucesso.')
   } catch (err) {
