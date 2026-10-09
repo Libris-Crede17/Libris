@@ -216,7 +216,11 @@ function renderCategories() {
 function renderCategorySelect() {
   const select = $('#bookCategoryInput')
   if (!select) return
-  select.innerHTML = getCategoryOptions().map((c) => `<option value="${c.id}">${c.name}</option>`).join('')
+  const categories = state?.categories || []
+  select.innerHTML = categories.map((c) => {
+    const codeVal = String(c.code || c.id || '').toUpperCase()
+    return `<option value="${codeVal}">${c.name}</option>`
+  }).join('')
 }
 function renderCategoryList() {
   const list = $('#categoryList')
@@ -315,39 +319,27 @@ async function addBook(event) {
     }
 
     const categorySelect = $('#bookCategoryInput')
-    const categoryId = categorySelect.value
-
+    const prefix = String(categorySelect?.value || 'GE').trim().toUpperCase()
     const categoriesList = state?.categories || []
-    const selectedCategory = categoriesList.find((c) => c.id === categoryId || c.code === categoryId)
-
-    const prefix = String(
-      selectedCategory?.code || 
-      selectedCategory?.id || 
-      categoryId || 
-      'GE'
-    ).trim().toUpperCase()
-
+    const selectedCategory = categoriesList.find((c) => String(c.code || c.id).toUpperCase() === prefix)
+    const categoryName = selectedCategory?.name || prefix
     const counterRef = doc(db, 'counters', `books_${prefix}`)
-
-    await runTransaction(db, async (tx) => {
+      await runTransaction(db, async (tx) => {
       const counterSnap = await tx.get(counterRef)
       const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
       const nextCodeNumber = lastCode + 1
-      
       const numberCode = normalizeBookCode(nextCodeNumber)
-      
       const code = `${prefix}-${numberCode}`
-
       tx.set(counterRef, {
         prefix,
         lastCode: nextCodeNumber,
         updatedAt: serverTimestamp()
       }, { merge: true })
-
       tx.set(doc(collection(db, 'books')), {
         ...book,
         code,
-        categoryName: selectedCategory?.name || categoryId,
+        categoryId: prefix,
+        categoryName: categoryName,
         schoolId: config.currentSchoolId,
         available: book.total,
         status: 'disponivel',
@@ -355,7 +347,7 @@ async function addBook(event) {
         updatedAt: serverTimestamp()
       })
     })
-
+    
     await logAudit('book_created', { title: book.title, categoryId: book.categoryId, total: book.total }, state.user?.uid || null)
     resetBookForm()
     toast('Livro cadastrado com sucesso.')
