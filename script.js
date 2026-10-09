@@ -96,7 +96,6 @@ async function ensureCurrentSchoolId() {
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-
       syncSchoolSettingsForm()
       return
     }
@@ -137,7 +136,6 @@ async function ensureCurrentSchoolId() {
     syncSchoolSettingsForm()
   }
 }
-
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => [...document.querySelectorAll(s)]
 const e = { grid: $('#bookGrid'), results: $('#resultsMeta'), categories: $('#categoryFilters'), books: $('#bookTableBody'), readers: $('#readersTableBody'), loans: $('#loansTableBody'), kpis: $('#kpiGrid'), genre: $('#genreChart'), course: $('#courseChart'), topReaders: $('#readerChart'), donut: $('#statusDonut'), legend: $('#statusLegend'), toast: $('#toast') }
@@ -818,7 +816,17 @@ async function init() {
   renderDashboard();
   try {
     const school = await getDoc(doc(db, 'schools', config.currentSchoolId));
-    if (school.exists() && school.data().name) config.schoolName = school.data().name;
+    if (school.exists()) {
+      const data = school.data()
+      if (data.name) config.schoolName = data.name
+      config.coordinationEmail = data.coordinationEmail || ''
+      config.reminderDays = Number(data.reminderDays ?? 1)
+      config.coordinationDays = Number(data.coordinationDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+      syncSchoolSettingsForm()
+    }
     $('#schoolName').textContent = config.schoolName;
   } catch (err) { error(err) }
   subscribeBooks();
