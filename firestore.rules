@@ -18,10 +18,11 @@ service cloud.firestore {
     }
 
     function validBookStock() {
-      return request.resource.data.keys().hasAll(['title', 'author', 'schoolId', 'total', 'available'])
+      return request.resource.data.keys().hasAll(['title', 'author', 'schoolId', 'total', 'available', 'category'])
         && request.resource.data.title is string
         && request.resource.data.author is string
         && request.resource.data.schoolId is string
+        && request.resource.data.category is string
         && request.resource.data.total is int
         && request.resource.data.total >= 1
         && request.resource.data.available is int
