@@ -314,8 +314,19 @@ async function addBook(event) {
       return
     }
 
-    const prefix = String(selectedCategory?.code || selectedCategory?.id || 'GE').toUpperCase()
-    
+    const categorySelect = $('#bookCategoryInput')
+    const categoryId = categorySelect.value
+
+    const categoriesList = state?.categories || []
+    const selectedCategory = categoriesList.find((c) => c.id === categoryId || c.code === categoryId)
+
+    const prefix = String(
+      selectedCategory?.code || 
+      selectedCategory?.id || 
+      categoryId || 
+      'GE'
+    ).trim().toUpperCase()
+
     const counterRef = doc(db, 'counters', `books_${prefix}`)
 
     await runTransaction(db, async (tx) => {
@@ -336,7 +347,7 @@ async function addBook(event) {
       tx.set(doc(collection(db, 'books')), {
         ...book,
         code,
-        categoryName: selectedCategory.name,
+        categoryName: selectedCategory?.name || categoryId,
         schoolId: config.currentSchoolId,
         available: book.total,
         status: 'disponivel',
