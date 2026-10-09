@@ -173,7 +173,19 @@ function modal(id, open) { const el = document.getElementById(id); el.classList.
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
 
 function normalizeBookCode(value) {
-  return String(value ?? '').replace(/\D+/g, '').slice(0, 5).padStart(5, '0')
+  return String(value ?? '').replace(/\D+/g, '').slice(0, 4).padStart(4, '0')
+}
+
+function getCategoryPrefix(categoryName) {
+  if (!categoryName) return 'GE'
+  const words = categoryName.trim().split(/\s+/)
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase()
+  } else if (words[0].length >= 2) {
+    return words[0].slice(0, 2).toUpperCase()
+  } else {
+    return (words[0][0] + 'X').toUpperCase()
+  }
 }
 
 function getLoanLimitForReader(reader = {}) {
@@ -303,11 +315,15 @@ async function addBook(event) {
     }
 
     const counterRef = doc(db, 'counters', 'books')
+    const counterRef = doc(db, 'counters', 'books')
     await runTransaction(db, async (tx) => {
       const counterSnap = await tx.get(counterRef)
       const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
       const nextCodeNumber = lastCode + 1
-      const code = normalizeBookCode(nextCodeNumber)
+      
+      const prefix = getCategoryPrefix(selectedCategory?.name)
+      const numberCode = normalizeBookCode(nextCodeNumber)
+      const code = `${prefix}-${numberCode}`
 
       tx.set(counterRef, {
         lastCode: nextCodeNumber,
