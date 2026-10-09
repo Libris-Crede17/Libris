@@ -320,8 +320,8 @@ async function addBook(event) {
       const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
       const nextCodeNumber = lastCode + 1
       
-      const prefix = (selectedCategory?.code || selectedCategory?.id || 'GE').toUpperCase()
-     
+      const prefix = String(selectedCategory?.code || selectedCategory?.id || categoryId || 'GE').toUpperCase()
+      
       const numberCode = normalizeBookCode(nextCodeNumber)
       
       const code = `${prefix}-${numberCode}`
