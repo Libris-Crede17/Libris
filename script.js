@@ -50,6 +50,9 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
     }
     const schoolNameNode = $('#schoolName')
     if (schoolNameNode) schoolNameNode.textContent = config.schoolName
@@ -90,6 +93,10 @@ async function ensureCurrentSchoolId() {
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+
       syncSchoolSettingsForm()
       return
     }
@@ -104,12 +111,18 @@ async function ensureCurrentSchoolId() {
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
     } else {
       config.currentSchoolId = 'escola-padrao'
       config.schoolName = 'Biblioteca escolar'
       config.coordinationEmail = ''
       config.reminderDays = 1
       config.coordinationDays = 7
+      config.maxBooksStudent = 2
+      config.maxBooksTeacher = 35
+      config.teacherLoanDays = 21
     }
     syncSchoolSettingsForm()
   } catch (err) {
@@ -118,9 +131,13 @@ async function ensureCurrentSchoolId() {
     config.coordinationEmail = ''
     config.reminderDays = 1
     config.coordinationDays = 7
+    config.maxBooksStudent = 2
+    config.maxBooksTeacher = 35
+    config.teacherLoanDays = 21
     syncSchoolSettingsForm()
   }
 }
+
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => [...document.querySelectorAll(s)]
 const e = { grid: $('#bookGrid'), results: $('#resultsMeta'), categories: $('#categoryFilters'), books: $('#bookTableBody'), readers: $('#readersTableBody'), loans: $('#loansTableBody'), kpis: $('#kpiGrid'), genre: $('#genreChart'), course: $('#courseChart'), topReaders: $('#readerChart'), donut: $('#statusDonut'), legend: $('#statusLegend'), toast: $('#toast') }
