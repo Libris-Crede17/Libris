@@ -444,8 +444,19 @@ async function registerLoan() {
   if (!book || !reader) {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
   }
+  
+  const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
+  const loanLimit = getLoanLimitForReader(reader)
 
-  // 1. Verifica se o leitor já está com este mesmo livro emprestado
+  console.log('--- DIAGNÓSTICO DE EMPRÉSTIMO ---')
+  console.log('Leitor selecionado:', reader)
+  console.log('Limite calculado:', loanLimit)
+  console.log('Empréstimos ativos encontrados no state:', activeLoansForReader)
+
+  if (activeLoansForReader.length >= loanLimit) {
+    return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
+  }
+
   const duplicateLoansSnap = await getDocs(query(
     collection(db, 'loans'),
     where('schoolId', '==', config.currentSchoolId),
@@ -455,16 +466,7 @@ async function registerLoan() {
   ))
 
   if (!duplicateLoansSnap.empty) {
-    toast('Este leitor já possui um empréstimo ativo para este mesmo livro!', 'error')
-    return
-  }
-
-  // 2. Valida o limite de empréstimos ativos do aluno
-  const loanLimit = getLoanLimitForReader(reader)
-  const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active').length
-  if (activeLoansForReader >= loanLimit) {
-    toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos.`, 'error')
-    return
+    return toast('Este leitor já possui um empréstimo ativo para este mesmo livro!', 'error')
   }
 
   const role = String(reader.role || reader.type || 'student').toLowerCase()
@@ -507,6 +509,22 @@ async function registerLoan() {
         updatedAt: serverTimestamp()
       })
     })
+
+    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
+    $('#bookCodeInput').value = ''
+    $('#readerInput').value = ''
+    $('#readerSelectInput').value = ''
+    toast('Empréstimo registrado.')
+  } catch (err) {
+    if (err.message === 'indisponível') {
+      toast('Livro indisponível.', 'error')
+      return
+    }
+    error(err, 'Não foi possível registrar o empréstimo.')
+  } finally {
+    loading(button, false)
+  }
+}
 
     await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
     $('#bookCodeInput').value = ''
