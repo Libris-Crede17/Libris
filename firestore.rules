@@ -14,7 +14,11 @@ service cloud.firestore {
     }
 
     function sameSchool(schoolId) {
-      return signedIn() && currentUserDoc() != null && currentUserDoc().data.schoolId == schoolId;
+      return signedIn() && currentUserDoc() != null && (
+        currentUserDoc().data.schoolId == schoolId ||
+        !('schoolId' in currentUserDoc().data) ||
+        schoolId == 'escola-padrao'
+      );
     }
 
     function validBookStock() {
@@ -93,8 +97,7 @@ service cloud.firestore {
         && (!('notices' in request.resource.data) || request.resource.data.notices is map);
       allow update: if signedIn() && isAdmin()
         && resource.data.schoolId == currentUserDoc().data.schoolId
-        && request.resource.data.schoolId == resource.data.schoolId
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['notices']);
+        && request.resource.data.schoolId == resource.data.schoolId;
       allow delete: if false;
     }
 
