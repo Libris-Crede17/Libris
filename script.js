@@ -445,6 +445,7 @@ async function registerLoan() {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
   }
 
+  // 1. Verifica se o leitor já está com este mesmo livro emprestado
   const duplicateLoansSnap = await getDocs(query(
     collection(db, 'loans'),
     where('schoolId', '==', config.currentSchoolId),
@@ -458,6 +459,7 @@ async function registerLoan() {
     return
   }
 
+  // 2. Valida o limite de empréstimos ativos do aluno
   const loanLimit = getLoanLimitForReader(reader)
   const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active').length
   if (activeLoansForReader >= loanLimit) {
@@ -466,19 +468,6 @@ async function registerLoan() {
   }
 
   const role = String(reader.role || reader.type || 'student').toLowerCase()
-  const maxBooks = role === 'teacher' ? Number(config.maxBooksTeacher || 35) : Number(config.maxBooksStudent || 2)
-  const activeLoanQuery = query(
-    collection(db, 'loans'),
-    where('readerId', '==', reader.id),
-    where('status', '==', 'active')
-  )
-  const activeLoanSnap = await getDocs(activeLoanQuery)
-
-  if (activeLoanSnap.docs.length >= maxBooks) {
-    toast(`Limite de empréstimos atingido para ${reader.role || reader.type || 'este perfil'}.`, 'error')
-    return
-  }
-
   loading(button, true, 'Registrando…')
 
   try {
@@ -519,6 +508,21 @@ async function registerLoan() {
       })
     })
 
+    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
+    $('#bookCodeInput').value = ''
+    $('#readerInput').value = ''
+    $('#readerSelectInput').value = ''
+    toast('Empréstimo registrado.')
+  } catch (err) {
+    if (err.message === 'indisponível') {
+      toast('Livro indisponível.', 'error')
+      return
+    }
+    error(err, 'Não foi possível registrar o empréstimo.')
+  } finally {
+    loading(button, false)
+  }
+}
     await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
     $('#bookCodeInput').value = ''
     $('#readerInput').value = ''
