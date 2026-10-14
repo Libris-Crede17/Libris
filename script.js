@@ -15,7 +15,7 @@ const config = {
     serviceId: 'service_kj4o9me', 
     studentTemplateId: 'template_7jhtc1d', 
     coordinationTemplateId: 'template_05hf89g', 
-    publicKey: 'HFLjKgXlJ5szrgRbt' 
+    publicKey: '3NnWny8jJqnZwiFWU' 
   }
 }
 const defaultCategories = [ ]
