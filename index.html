@@ -186,68 +186,21 @@
               </div>
             </div>
 
-            <div class="tab-panel" data-panel="acervo">
-              <div class="panel panel-header-actions">
-                <div class="panel-head">
-                  <h3>Acervo</h3>
-                </div>
-                <button class="btn btn-primary" type="button" id="addBookBtn">Adicionar Novo Livro</button>
-              </div>
+            <div class="panel panel-header-actions">
+  <div class="panel-head">
+    <h3>Acervo</h3>
+  </div>
+  <div class="action-row">
+    <button class="btn btn-primary" type="button" id="openBookModalBtn">Adicionar Novo Livro</button>
+  </div>
+</div>
 
-              <div class="inline-form-panel panel mt-24 hidden" id="bookFormPanel">
-                <div class="panel-head">
-                  <h3>Cadastrar livro</h3>
-                </div>
-
-                <form id="bookForm" class="form-grid">
-                  <label>
-                    <span>Título</span>
-                    <input id="bookTitleInput" type="text" placeholder="Ex: A Revolução dos Bichos" required />
-                  </label>
-                  <label>
-                    <span>Autor</span>
-                    <input id="bookAuthorInput" type="text" placeholder="Ex: George Orwell" required />
-                  </label>
-                  <label>
-                    <span>Editora</span>
-                    <input id="bookPublisherInput" type="text" placeholder="Ex: Companhia das Letras" />
-                  </label>
-                  <label>
-                    <span>Categoria</span>
-                    <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
-                  </label>
-                  <label>
-                    <span>Ano</span>
-                    <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
-                  </label>
-                  <label>
-                    <span>Localização</span>
-                    <input id="bookShelfInput" type="text" placeholder="Ex: Estante 3 · Prateleira A" />
-                  </label>
-                  <label>
-                    <span>Quantidade de exemplares</span>
-                    <input id="bookQuantityInput" type="number" min="1" value="1" required />
-                  </label>
-                  <label>
-                    <span>Número de tombamento</span>
-                    <input id="bookTombamentoInput" type="text" />
-                  </label>
-                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                    <input id="bookIdInput" type="hidden" />
-                    <button class="btn btn-ghost hidden" id="cancelBookEditBtn" type="button">Cancelar edição</button>
-                    <button class="btn btn-primary" id="saveBookBtn" type="submit">Salvar livro</button>
-                  </div>
-                </form>
-              </div>
-
-              <div class="panel mt-24">
+  <div class="panel mt-24">
   <div class="panel-head flex-between">
     <h3>Categorias</h3>
-    <button class="btn btn-primary" type="button" id="openCategoryModalBtn">
-      + Nova Categoria
-    </button>
+    <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
   </div>
-  
+
   <div class="table-wrap table-responsive mt-16" id="categoryList"></div>
 </div>
               <div class="mt-24 panel">
@@ -276,66 +229,12 @@
               </div>
             </div>
 
-            <div class="tab-panel" data-panel="leitores">
-              <div class="panel panel-header-actions">
-                <div class="panel-head">
-                  <h3>Leitores</h3>
-                </div>
-                <button class="btn btn-primary" type="button" id="addReaderBtn">Adicionar Novo Leitor</button>
-              </div>
-
-                <div class="inline-form-panel panel mt-24 hidden" id="readerFormPanel">
-                  <div class="panel-head">
-                    <h3>Cadastrar leitor</h3>
-                  </div>
-
-                  <form id="readerForm" class="form-grid">
-                    <label>
-                      <span>Nome completo</span>
-                      <input id="readerNameInput" type="text" placeholder="Ex: Ana Souza" required />
-                    </label>
-                    <label>
-                      <span>Tipo</span>
-                      <select id="readerTypeInput">
-                        <option value="Aluno">Aluno</option>
-                        <option value="Professor">Professor</option>
-                        <option value="Outros">Outros</option>
-                      </select>
-                    </label>
-                    <label id="readerCourseField">
-                      <span>Curso / Turma</span>
-                      <input id="readerCourseInput" type="text" placeholder="Ex: Informática · 2026" required />
-                    </label>
-                    <label id="readerRegistrationField">
-                      <span>Matrícula</span>
-                      <input id="readerRegistrationInput" type="text" placeholder="Ex: 202600123" required />
-                    </label>
-                    <label id="readerCpfField" class="hidden">
-                      <span>CPF</span>
-                      <input id="readerCpfInput" type="text" inputmode="numeric" placeholder="Ex: 000.000.000-00" />
-                    </label>
-                    <label>
-                      <span>E-mail</span>
-                      <input id="readerEmailInput" type="email" placeholder="Ex: ana@escola.edu.br" required />
-                    </label>
-                    <label>
-                      <span>Telefone</span>
-                      <input id="readerPhoneInput" type="tel" placeholder="Ex: (88) 99999-9999" required />
-                    </label>
-                    <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                      <input id="readerIdInput" type="hidden" />
-                      <button class="btn btn-ghost hidden" id="cancelReaderEditBtn" type="button">Cancelar edição</button>
-                      <button class="btn btn-primary" id="saveReaderBtn" type="submit">Salvar leitor</button>
-                    </div>
-                  </form>
-                </div>
-
-                <div class="mt-24">
-                  <label>
-                    <span>Buscar leitor</span>
-                    <input id="readerSearchInput" type="search" placeholder="Nome, tipo ou ano" />
-                  </label>
-                </div>
+            <div class="panel panel-header-actions">
+  <div class="panel-head">
+    <h3>Leitores</h3>
+  </div>
+  <button class="btn btn-primary" type="button" id="openReaderModalBtn">Adicionar Novo Leitor</button>
+</div>
 
                 <div class="table-wrap mt-24">
                   <table>
@@ -483,11 +382,112 @@
     </div>
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
+<!-- MODAL PARA CADASTRAR/EDITAR LIVRO -->
+<div class="modal hidden" id="bookFormModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close="bookFormModal"></div>
+  <div class="modal-card">
+    <button class="modal-close" type="button" data-close="bookFormModal">×</button>
+    <div class="login-header mb-4">
+      <h3 id="bookModalTitle">Cadastrar livro</h3>
+    </div>
+    <form id="bookForm" class="form-grid">
+      <label>
+        <span>Título</span>
+        <input id="bookTitleInput" type="text" placeholder="Ex: A Revolução dos Bichos" required />
+      </label>
+      <label>
+        <span>Autor</span>
+        <input id="bookAuthorInput" type="text" placeholder="Ex: George Orwell" required />
+      </label>
+      <label>
+        <span>Editora</span>
+        <input id="bookPublisherInput" type="text" placeholder="Ex: Companhia das Letras" />
+      </label>
+      <label>
+        <span>Categoria</span>
+        <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
+      </label>
+      <label>
+        <span>Ano</span>
+        <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
+      </label>
+      <label>
+        <span>Localização</span>
+        <input id="bookShelfInput" type="text" placeholder="Ex: Estante 3 · Prateleira A" />
+      </label>
+      <label>
+        <span>Quantidade de exemplares</span>
+        <input id="bookQuantityInput" type="number" min="1" value="1" required />
+      </label>
+      <label>
+        <span>Número de tombamento</span>
+        <input id="bookTombamentoInput" type="text" />
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; grid-column: 1 / -1; margin-top: 1rem;">
+        <input id="bookIdInput" type="hidden" />
+        <button class="btn btn-secondary" id="cancelBookEditBtn" type="button" data-close="bookFormModal">Cancelar</button>
+        <button class="btn btn-primary" id="saveBookBtn" type="submit">Salvar livro</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL PARA CADASTRAR/EDITAR LEITOR -->
+<div class="modal hidden" id="readerFormModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close="readerFormModal"></div>
+  <div class="modal-card">
+    <button class="modal-close" type="button" data-close="readerFormModal">×</button>
+    <div class="login-header mb-4">
+      <h3 id="readerModalTitle">Cadastrar leitor</h3>
+    </div>
+    <form id="readerForm" class="form-grid">
+      <label>
+        <span>Nome completo</span>
+        <input id="readerNameInput" type="text" placeholder="Ex: Ana Souza" required />
+      </label>
+      <label>
+        <span>Tipo</span>
+        <select id="readerTypeInput">
+          <option value="Aluno">Aluno</option>
+          <option value="Professor">Professor</option>
+          <option value="Outros">Outros</option>
+        </select>
+      </label>
+      <label id="readerCourseField">
+        <span>Curso / Turma</span>
+        <input id="readerCourseInput" type="text" placeholder="Ex: Informática · 2026" required />
+      </label>
+      <label id="readerRegistrationField">
+        <span>Matrícula</span>
+        <input id="readerRegistrationInput" type="text" placeholder="Ex: 202600123" required />
+      </label>
+      <label id="readerCpfField" class="hidden">
+        <span>CPF</span>
+        <input id="readerCpfInput" type="text" inputmode="numeric" placeholder="Ex: 000.000.000-00" />
+      </label>
+      <label>
+        <span>E-mail</span>
+        <input id="readerEmailInput" type="email" placeholder="Ex: ana@escola.edu.br" required />
+      </label>
+      <label>
+        <span>Telefone</span>
+        <input id="readerPhoneInput" type="tel" placeholder="Ex: (88) 99999-9999" required />
+      </label>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; grid-column: 1 / -1; margin-top: 1rem;">
+        <input id="readerIdInput" type="hidden" />
+        <button class="btn btn-secondary" id="cancelReaderEditBtn" type="button" data-close="readerFormModal">Cancelar</button>
+        <button class="btn btn-primary" id="saveReaderBtn" type="submit">Salvar leitor</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL PARA CADASTRAR CATEGORIA -->
 <div class="modal hidden" id="categoryModal" aria-hidden="true">
   <div class="modal-backdrop" data-close="categoryModal"></div>
   <div class="modal-card small">
     <button class="modal-close" type="button" data-close="categoryModal">×</button>
-    <div class="login-header">
+    <div class="login-header mb-4">
       <h3>Cadastrar Categoria</h3>
     </div>
     <form id="categoryForm" class="login-form">
@@ -499,15 +499,12 @@
         <span>Código</span>
         <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
       </label>
-      <div class="action-row mt-16">
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top: 1rem;">
         <button class="btn btn-secondary" type="button" data-close="categoryModal">Cancelar</button>
         <button class="btn btn-primary" type="submit">Salvar categoria</button>
       </div>
     </form>
   </div>
 </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script type="module" src="script.js"></script>
   </body>
 </html> 
