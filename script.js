@@ -444,19 +444,21 @@ async function registerLoan() {
   if (!book || !reader) {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
   }
-  
+
+  // 1. Diagnóstico de Empréstimos Ativos do Leitor
   const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
   const loanLimit = getLoanLimitForReader(reader)
 
   console.log('--- DIAGNÓSTICO DE EMPRÉSTIMO ---')
   console.log('Leitor selecionado:', reader)
-  console.log('Limite calculado:', loanLimit)
+  console.log('Limite calculated:', loanLimit)
   console.log('Empréstimos ativos encontrados no state:', activeLoansForReader)
 
   if (activeLoansForReader.length >= loanLimit) {
     return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
   }
 
+  // 2. Verifica duplicidade de livro emprestado
   const duplicateLoansSnap = await getDocs(query(
     collection(db, 'loans'),
     where('schoolId', '==', config.currentSchoolId),
