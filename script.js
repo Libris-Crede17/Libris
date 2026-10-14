@@ -614,6 +614,7 @@ function openWhatsAppMessage(reader, message) {
 async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
   const email = String(recipient?.email || '').trim()
   if (!email) return false
+
   const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
   const serviceId = config.emailjs.serviceId
   const publicKey = config.emailjs.publicKey
@@ -629,8 +630,8 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
     await window.emailjs.send(serviceId, templateId, {
       to_email: email,
       to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso de biblioteca',
-      message,
+      subject: 'Aviso da Biblioteca',
+      message: message,
       organization: config.organizationName,
       school_name: config.schoolName,
       escola: config.schoolName,
@@ -642,7 +643,7 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
     })
     return true
   } catch (error) {
-    console.error('EmailJS failed:', error)
+    console.error('Falha no EmailJS:', error)
     window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('Aviso de biblioteca')}&body=${encodeURIComponent(message)}`
     return true
   }
@@ -654,15 +655,30 @@ async function triggerNotification(type) {
   const loan = state.loans.find((item) => item.id === loanId)
   const reader = state.readers.find((item) => item.id === loan?.readerId)
   const message = $('#notificationMessage').value.trim()
-  if (!loan || !reader || !message) return toast('Não foi possível enviar a notificação.', 'error')
+
+  if (!loan || !reader || !message) {
+    return toast('Não foi possível enviar a notificação.', 'error')
+  }
 
   if (type === 'coordination') {
-    if (!config.coordinationEmail) return toast('Cadastre o e-mail da coordenação na escola.', 'error')
-    const coordination = { name: 'Coordenação', email: config.coordinationEmail }
-    const coordinationMessage = `Olá, coordenação. O empréstimo de "${loan.bookTitle}" para ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}. Favor verificar com o aluno.`
-    const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId)
+    if (!config.coordinationEmail) {
+      return toast('Cadastre o e-mail da coordenação nas configurações da escola.', 'error')
+    }
+
+    const coordination = { 
+      name: 'Coordenação', 
+      email: config.coordinationEmail 
+    }
+
+    const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
+
+    const templateId = config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId
+
+    const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, templateId)
+
     if (!sent) return toast('Não foi possível enviar o aviso à coordenação.', 'error')
-    toast('Aviso enviado ou preparado para a coordenação.')
+
+    toast('Aviso enviado à coordenação com sucesso!')
     modal('notificationModal', false)
     return
   }
@@ -670,16 +686,20 @@ async function triggerNotification(type) {
   if (type === 'whatsapp') {
     const sent = openWhatsAppMessage(reader, message)
     if (!sent) return toast('Este leitor não possui telefone para WhatsApp.', 'error')
+
     toast('WhatsApp aberto com a mensagem.')
     modal('notificationModal', false)
     return
   }
 
   const sent = await sendEmailNotification(reader, message, loan, reader, config.emailjs.studentTemplateId)
+
   if (!sent) return toast('Este leitor não possui e-mail para envio.', 'error')
-  toast('E-mail enviado ou preparado para envio.')
+
+  toast('E-mail enviado ao leitor com sucesso!')
   modal('notificationModal', false)
 }
+
 function exportCsv() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])], csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
 function exportXlsx() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])]; const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
 function subscribeBooks() {
