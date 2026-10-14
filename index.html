@@ -88,7 +88,6 @@
               <button class="btn btn-secondary" id="importCsvBtn" type="button">Importar CSV</button>
               <button class="btn btn-secondary" id="exportBtn" type="button">Exportar CSV</button>
               <button class="btn btn-secondary" id="exportXlsxBtn" type="button">Exportar XLSX</button>
-              <input id="importCsvInput" class="hidden" type="file" accept=".csv,text/csv" />
             </div>
           </div>
 
@@ -438,6 +437,21 @@
           <button class="btn btn-primary" type="submit">Entrar no painel</button>
           <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
         </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="importCsvFileModal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="importCsvFileTitle">
+        <button class="modal-close" id="closeCsvFileModalBtn" type="button" aria-label="Fechar seleção de arquivo">×</button>
+        <h3 id="importCsvFileTitle">Importar livros do acervo</h3>
+        <label>
+          <span>Arquivo CSV</span>
+          <input id="importCsvInput" type="file" accept=".csv,text/csv" />
+        </label>
+        <div class="action-row">
+          <button class="btn btn-secondary" id="cancelCsvFileBtn" type="button">Cancelar</button>
+        </div>
       </div>
     </div>
 

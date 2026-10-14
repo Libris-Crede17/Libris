@@ -731,6 +731,7 @@ async function importCsv(event) {
   const input = event.target
   const file = input.files?.[0]
   if (!file) return
+  modal('importCsvFileModal', false)
   if (!canUseFirebase || !db || !state.user) { input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
 
   try {
@@ -944,8 +945,11 @@ function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.vie
 };
 }
 syncSchoolSettingsForm()
-$('#importCsvBtn').onclick = () => $('#importCsvInput').click()
+$('#importCsvBtn').onclick = () => modal('importCsvFileModal', true)
 $('#importCsvInput').onchange = importCsv
+const cancelCsvFileSelection = () => { $('#importCsvInput').value = ''; modal('importCsvFileModal', false) }
+$('#cancelCsvFileBtn').onclick = cancelCsvFileSelection
+$('#closeCsvFileModalBtn').onclick = cancelCsvFileSelection
 const cancelCsvImport = () => { pendingCsvImport = null; modal('importCsvConfirmModal', false) }
 $('#cancelCsvImportBtn').onclick = cancelCsvImport
 $('#closeCsvImportBtn').onclick = cancelCsvImport
