@@ -451,7 +451,7 @@ async function registerLoan() {
 
   console.log('--- DIAGNÓSTICO DE EMPRÉSTIMO ---')
   console.log('Leitor selecionado:', reader)
-  console.log('Limite calculated:', loanLimit)
+  console.log('Limite calculado:', loanLimit)
   console.log('Empréstimos ativos encontrados no state:', activeLoansForReader)
 
   if (activeLoansForReader.length >= loanLimit) {
@@ -520,25 +520,6 @@ async function registerLoan() {
   } catch (err) {
     if (err.message === 'indisponível') {
       toast('Livro indisponível.', 'error')
-      return
-    }
-    error(err, 'Não foi possível registrar o empréstimo.')
-  } finally {
-    loading(button, false)
-  }
-}
-    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
-    $('#bookCodeInput').value = ''
-    $('#readerInput').value = ''
-    $('#readerSelectInput').value = ''
-    toast('Empréstimo registrado.')
-  } catch (err) {
-    if (err.message === 'indisponível') {
-      toast('Livro indisponível.', 'error')
-      return
-    }
-    if (err.message === 'limite') {
-      toast(`Limite de empréstimos atingido para ${reader.role || reader.type || 'este perfil'}.`, 'error')
       return
     }
     error(err, 'Não foi possível registrar o empréstimo.')
@@ -767,7 +748,7 @@ async function saveSchoolSettings(event) {
     error(err, 'Não foi possível salvar as configurações da escola.')
   }
 }
-function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#schoolSettingsForm').onsubmit = saveSchoolSettings; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = startQrScanner; $('#addBookBtn').onclick = () => { resetBookForm(); openForm('acervo', '#bookFormPanel', '#bookTitleInput') }; $('#addReaderBtn').onclick = () => { resetReaderForm(); openForm('leitores', '#readerFormPanel', '#readerNameInput') }; $('#cancelBookEditBtn').onclick = resetBookForm; $('#cancelReaderEditBtn').onclick = resetReaderForm; $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) }); $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
+function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#schoolSettingsForm').onsubmit = saveSchoolSettings; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = startQrScanner; $('#addBookBtn').onclick = () => { resetBookForm(); openForm('acervo', '#bookFormPanel', '#bookTitleInput') }; $('#addReaderBtn').onclick = () => { resetReaderForm(); openForm('leitores', '#readerFormPanel', '#readerNameInput') }; $('#cancelBookEditBtn').onclick = resetBookForm; $('#cancelReaderEditBtn').onclick = resetReaderForm; $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) });$('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
   if (!canUseFirebase || !auth) {
     state.user = null;
     $('#logoutBtn').classList.add('hidden');
