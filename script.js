@@ -24,7 +24,7 @@ const fallbackBooks = [ ]
 const fallbackReaders = [ ]
 const fallbackLoans = [ ]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
-const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [] }
+const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [], loanFilter: 'all' }
 let pendingCsvImport = null
 
 function syncSchoolSettingsForm(data = config) {
@@ -256,8 +256,43 @@ function renderBars(target, data) { if (!target) return; if (!data.length) { tar
 
 function renderDashboard() { 
   const active = state.loans.filter((l) => l.status === 'active'); 
-  const values = [['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚'], ['Empréstimos Ativos', active.length, '📖'], ['Livros em Atraso', active.filter(overdue).length, '⚠️'], ['Leitores Cadastrados', state.readers.length, '👥']]; 
-  if (e.kpis) e.kpis.innerHTML = values.map(([name, value, icon]) => `<div class="kpi-card"><div class="kpi-card-head"><span>${name}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div></div>`).join(''); 
+  const overdueCount = active.filter(overdue).length;
+
+  const values = [
+    ['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚', 'acervo'],
+    ['Empréstimos Ativos', active.length, '📖', 'checkout'],
+    ['Livros em Atraso', overdueCount, '⚠️', 'checkout'],
+    ['Leitores Cadastrados', state.readers.length, '👥', 'leitores']
+  ]; 
+
+  if (e.kpis) {
+    e.kpis.innerHTML = values.map(([name, value, icon, targetTab]) => `
+      <div class="kpi-card panel clickable-kpi" data-target-tab="${targetTab}" style="cursor: pointer;">
+        <div class="kpi-card-head">
+          <span>${name}</span>
+          <span class="kpi-icon">${icon}</span>
+        </div>
+        <div class="kpi-value">${value}</div>
+      </div>
+    `).join('');
+
+    $$('.clickable-kpi').forEach((card) => {
+      card.onclick = () => {
+        const targetTab = card.dataset.targetTab;
+        if (targetTab) {
+          const cardTitle = card.querySelector('span')?.textContent;
+          if (cardTitle === 'Livros em Atraso') {
+            state.loanFilter = 'overdue';
+          } else if (cardTitle === 'Empréstimos Ativos') {
+            state.loanFilter = 'all';
+          }
+          tab(targetTab);
+          renderLoans();
+        }
+      };
+    });
+  }
+
   renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); 
   const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; 
   if (e.donut) e.donut.innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`; 
@@ -266,7 +301,6 @@ function renderDashboard() {
   const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5); 
   if (e.topReaders) e.topReaders.innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>' 
 }
-
 function hydrateFallbackData() {
   state.categories = [...defaultCategories]
   state.books = fallbackBooks.map((book) => {
@@ -287,13 +321,38 @@ function hydrateFallbackData() {
 
 function renderLoans() {
   if (!e.loans) return
-  const list = state.loans.filter((l) => l.status === 'active')
+
+  const list = state.loans.filter((l) => {
+    if (l.status !== 'active') return false
+
+    const reader = state.readers.find((r) => r.id === l.readerId)
+    const role = String(reader?.role || reader?.type || '').toLowerCase()
+
+    if (state.loanFilter === 'student') return role === 'student' || role === 'aluno'
+    if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
+    if (state.loanFilter === 'overdue') return overdue(l)
+    
+    return true // 'all'
+  })
+
   e.loans.innerHTML = list.length ? list.map((l) => {
     const selectedDays = Number(l.days || 7)
     const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
     return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
-  }).join('') : '<tr><td colspan="5">Nenhum empréstimo ativo.</td></tr>'
-  $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew)); $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify))
+  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
+
+  $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); 
+  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew));$$
+('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify));
+
+  const filterSelect = $('#loanFilterSelect')
+  if (filterSelect) {
+    filterSelect.value = state.loanFilter || 'all'
+    filterSelect.onchange = (evt) => {
+      state.loanFilter = evt.target.value
+      renderLoans()
+    }
+  }
 }
 
 function renderBooks() { 
