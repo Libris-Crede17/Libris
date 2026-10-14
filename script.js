@@ -450,7 +450,6 @@ async function registerLoan() {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
   }
 
-  // 1. Diagnóstico de Empréstimos Ativos do Leitor
   const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
   const loanLimit = getLoanLimitForReader(reader)
 
@@ -463,7 +462,6 @@ async function registerLoan() {
     return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
   }
 
-  // 2. Verifica duplicidade de livro emprestado
   const duplicateLoansSnap = await getDocs(query(
     collection(db, 'loans'),
     where('schoolId', '==', config.currentSchoolId),
@@ -623,31 +621,42 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
   const publicKey = config.emailjs.publicKey
   const dueDate = loan ? formatDate(loan.dueAt) : '—'
 
+  let diasAtraso = 0
+  if (loan && loan.dueAt) {
+    const due = date(loan.dueAt)
+    const today = new Date()
+    if (due < today) {
+      const diffTime = Math.abs(today - due)
+      diasAtraso = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    }
+  }
+
   if (!emailjsReady || !serviceId || !templateId || !publicKey) {
-    toast('Serviço de e-mail não configurado corretamente.', 'error')
+    toast('Serviço do EmailJS não está configurado corretamente.', 'error')
     return false
   }
 
   try {
     window.emailjs.init({ publicKey })
     await window.emailjs.send(serviceId, templateId, {
-      to_email: email,
-      to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso da Biblioteca',
-      message: message,
-      organization: config.organizationName,
-      school_name: config.schoolName,
-      escola: config.schoolName,
-      name: reader?.name || 'Leitor',
-      livro: loan?.bookTitle || '',
-      loan_days: Number(loan?.days || 0),
-      data_vencimento: dueDate,
-      date: dueDate
+    to_email: email,                                   
+    to_name: recipient?.name || reader?.name || 'Leitor',
+    subject: 'Aviso da Biblioteca',                      
+    message: message,                                   
+    school_name: config.schoolName,                     
+    escola: config.schoolName,                          
+    organization: config.organizationName,              
+    name: reader?.name || 'Leitor',                     
+    livro: loan?.bookTitle || '',                      
+    loan_days: Number(loan?.days || 0),                
+    data_vencimento: dueDate,                           
+    date: dueDate,                                      
+    dias_atraso: diasAtraso                            
     })
     return true
   } catch (error) {
     console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail.', 'error')
+    toast('Erro ao enviar e-mail pelo EmailJS. Verifique o console (F12).', 'error')
     return false
   }
 }
