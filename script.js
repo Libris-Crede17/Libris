@@ -186,26 +186,14 @@ const date = (v) => v?.toDate ? v.toDate() : v ? new Date(v) : null
 const formatDate = (v) => date(v)?.toLocaleDateString('pt-BR') || '—'
 const overdue = (l) => l.status === 'active' && date(l.dueAt) < new Date()
 
-function toast(message, type = 'success') { e.toast.textContent = message; e.toast.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { e.toast.className = 'toast hidden' }, 4000) }
+function toast(message, type = 'success') { if (!e.toast) return; e.toast.textContent = message; e.toast.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { e.toast.className = 'toast hidden' }, 4000) }
 function error(err, message = 'Não foi possível conectar ao servidor. Verifique sua conexão.') { console.error(err); toast(err?.code === 'auth/invalid-credential' ? 'E-mail ou senha inválidos.' : message, 'error') }
-function loading(button, value, text = 'Aguarde…') { button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
-function modal(id, open) { const el = document.getElementById(id); el.classList.toggle('hidden', !open); el.setAttribute('aria-hidden', String(!open)) }
+function loading(button, value, text = 'Aguarde…') { if (!button) return; button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
+function modal(id, open) { const el = document.getElementById(id); if (el) { el.classList.toggle('hidden', !open); el.setAttribute('aria-hidden', String(!open)) } }
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
 
 function normalizeBookCode(value) {
   return String(value ?? '').replace(/\D+/g, '').slice(0, 4).padStart(4, '0')
-}
-
-function getCategoryPrefix(categoryName) {
-  if (!categoryName) return 'GE'
-  const words = categoryName.trim().split(/\s+/)
-  if (words.length >= 2) {
-    return (words[0][0] + words[1][0]).toUpperCase()
-  } else if (words[0].length >= 2) {
-    return words[0].slice(0, 2).toUpperCase()
-  } else {
-    return (words[0][0] + 'X').toUpperCase()
-  }
 }
 
 function getLoanLimitForReader(reader = {}) {
@@ -230,29 +218,54 @@ async function logAudit(action, details = {}, actorUid = null) {
 
 function renderCategories() {
   const options = [{ id: 'all', name: 'Todas' }, ...getCategoryOptions()]
-  e.categories.innerHTML = options.map((c) => `<button type="button" class="category-chip ${state.category === c.id ? 'is-active' : ''}" data-category="${c.id}">${c.name}</button>`).join('')
-  $$('[data-category]').forEach((b) => b.onclick = () => { state.category = b.dataset.category; renderCategories(); renderPublicBooks() })
+  if (e.categories) {
+    e.categories.innerHTML = options.map((c) => `<button type="button" class="category-chip ${state.category === c.id ? 'is-active' : ''}" data-category="${c.id}">${c.name}</button>`).join('')
+    $$('[data-category]').forEach((b) => b.onclick = () => { state.category = b.dataset.category; renderCategories(); renderPublicBooks() })
+  }
 }
+
 function renderCategorySelect() {
   const select = $('#bookCategoryInput')
   if (!select) return
-  const categories = state?.categories || []
-  select.innerHTML = categories.map((c) => {
+  const categoriesList = state?.categories || []
+  select.innerHTML = categoriesList.map((c) => {
     const codeVal = String(c.code || c.id || '').toUpperCase()
     return `<option value="${codeVal}">${c.name}</option>`
   }).join('')
 }
+
 function renderCategoryList() {
   const list = $('#categoryList')
   if (!list) return
   list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${c.id}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
   $$('[data-del-category]').forEach((b) => b.onclick = () => removeCategory(b.dataset.delCategory))
 }
+
 function filteredBooks() { const q = state.query.toLowerCase().trim(); return state.books.filter((b) => (!q || [b.title, b.author, b.code, label(b.categoryId)].some((v) => String(v || '').toLowerCase().includes(q))) && (state.category === 'all' || b.categoryId === state.category) && (state.status === 'all' || bookStatus(b) === state.status)) }
-function renderPublicBooks() { const list = filteredBooks(); e.results.textContent = `${list.length} ${list.length === 1 ? 'resultado' : 'resultados'}`; e.grid.innerHTML = list.length ? list.map((b) => `<button class="book-card" type="button" data-book="${b.id}"><div class="book-cover ${b.coverUrl ? 'has-cover' : ''}">${b.coverUrl ? `<img class="book-cover-art" src="${b.coverUrl}" alt="Capa de ${esc(b.title)}">` : `<div class="book-cover-top"><span>${esc(b.categoryId)}</span><span>${esc(b.year || '—')}</span></div><div><div class="book-cover-title">${esc(b.title)}</div><div class="book-cover-author">${esc(b.author)}</div></div>`}</div><div class="book-card-meta"><div class="book-code-row"><span class="book-code">${esc(b.code)}</span><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></div><div class="book-card-title">${esc(b.title)}</div><div class="book-card-author">${esc(b.author)}</div><div class="book-card-category">${esc(b.categoryId)} · ${esc(label(b.categoryId))}</div><div class="book-card-location">📍 ${esc(b.shelf || 'Não informada')}</div></div></button>`).join('') : '<div class="panel empty-state">Nenhum livro encontrado.</div>'; $$('[data-book]').forEach((b) => b.onclick = () => showBook(state.books.find((x) => x.id === b.dataset.book))) }
+
+function renderPublicBooks() { 
+  const list = filteredBooks(); 
+  if (e.results) e.results.textContent = `${list.length} ${list.length === 1 ? 'resultado' : 'resultados'}`; 
+  if (e.grid) e.grid.innerHTML = list.length ? list.map((b) => `<button class="book-card" type="button" data-book="${b.id}"><div class="book-cover ${b.coverUrl ? 'has-cover' : ''}">${b.coverUrl ? `<img class="book-cover-art" src="${b.coverUrl}" alt="Capa de ${esc(b.title)}">` : `<div class="book-cover-top"><span>${esc(b.categoryId)}</span><span>${esc(b.year || '—')}</span></div><div><div class="book-cover-title">${esc(b.title)}</div><div class="book-cover-author">${esc(b.author)}</div></div>`}</div><div class="book-card-meta"><div class="book-code-row"><span class="book-code">${esc(b.code)}</span><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></div><div class="book-card-title">${esc(b.title)}</div><div class="book-card-author">${esc(b.author)}</div><div class="book-card-category">${esc(b.categoryId)} · ${esc(label(b.categoryId))}</div><div class="book-card-location">📍 ${esc(b.shelf || 'Não informada')}</div></div></button>`).join('') : '<div class="panel empty-state">Nenhum livro encontrado.</div>'; 
+  $$('[data-book]').forEach((b) => b.onclick = () => showBook(state.books.find((x) => x.id === b.dataset.book))) 
+}
+
 function showBook(b) { if (!b) return; $('#bookModalContent').innerHTML = `<div class="book-modal-cover">${b.coverUrl ? `<img class="book-cover-art modal-cover-art" src="${b.coverUrl}" alt="Capa de ${esc(b.title)}">` : `<div class="book-cover"><div class="book-cover-top"><span>${esc(b.categoryId)}</span><span>${esc(b.year || '—')}</span></div><div><div class="book-cover-title">${esc(b.title)}</div><div class="book-cover-author">${esc(b.author)}</div></div></div>`}</div><div class="book-details"><span class="eyebrow">${esc(label(b.categoryId))}</span><h3>${esc(b.title)}</h3><p>${esc(b.author)} · ${esc(b.year || 'Ano não informado')}</p><div class="book-meta-grid"><div class="meta-box"><div class="meta-label">ID</div><div class="meta-value">${esc(b.code)}</div></div><div class="meta-box"><div class="meta-label">Disponibilidade</div><div class="meta-value">${Number(b.available || 0)} de ${Number(b.total || 0)}</div></div><div class="meta-box"><div class="meta-label">Editora</div><div class="meta-value">${esc(b.publisher || 'Não informada')}</div></div><div class="meta-box"><div class="meta-label">Localização</div><div class="meta-value">${esc(b.shelf || 'Não informada')}</div></div></div><p>${esc(b.synopsis || 'Sinopse não informada.')}</p><div class="qr-box"><div class="qr-shape" aria-hidden="true"></div><small>QR Code público do livro<br><strong>${esc(b.code)}</strong></small></div></div>`; modal('bookModal', true) }
-function renderBars(target, data) { if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
-function renderDashboard() { const active = state.loans.filter((l) => l.status === 'active'); const values = [['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚'], ['Empréstimos Ativos', active.length, '📖'], ['Livros em Atraso', active.filter(overdue).length, '⚠️'], ['Leitores Cadastrados', state.readers.length, '👥']]; e.kpis.innerHTML = values.map(([name, value, icon]) => `<div class="kpi-card"><div class="kpi-card-head"><span>${name}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div></div>`).join(''); renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; e.donut.innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`; e.legend.innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`; renderBars(e.course, count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5)); const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5); e.topReaders.innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>' }
+
+function renderBars(target, data) { if (!target) return; if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
+
+function renderDashboard() { 
+  const active = state.loans.filter((l) => l.status === 'active'); 
+  const values = [['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚'], ['Empréstimos Ativos', active.length, '📖'], ['Livros em Atraso', active.filter(overdue).length, '⚠️'], ['Leitores Cadastrados', state.readers.length, '👥']]; 
+  if (e.kpis) e.kpis.innerHTML = values.map(([name, value, icon]) => `<div class="kpi-card"><div class="kpi-card-head"><span>${name}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div></div>`).join(''); 
+  renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); 
+  const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; 
+  if (e.donut) e.donut.innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`; 
+  if (e.legend) e.legend.innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`; 
+  renderBars(e.course, count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5)); 
+  const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5); 
+  if (e.topReaders) e.topReaders.innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>' 
+}
 
 function hydrateFallbackData() {
   state.categories = [...defaultCategories]
@@ -271,7 +284,9 @@ function hydrateFallbackData() {
   renderLoans()
   renderDashboard()
 }
+
 function renderLoans() {
+  if (!e.loans) return
   const list = state.loans.filter((l) => l.status === 'active')
   e.loans.innerHTML = list.length ? list.map((l) => {
     const selectedDays = Number(l.days || 7)
@@ -280,7 +295,15 @@ function renderLoans() {
   }).join('') : '<tr><td colspan="5">Nenhum empréstimo ativo.</td></tr>'
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew)); $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify))
 }
-function renderBooks() { const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); e.books.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook)) }
+
+function renderBooks() { 
+  if (!e.books) return;
+  const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); 
+  e.books.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; 
+  $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
+  $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook)) 
+}
+
 function renderReaderSelector() {
   const select = $('#readerSelectInput')
   if (!select) return
@@ -291,24 +314,103 @@ function renderReaderSelector() {
   })
   select.innerHTML = options.join('')
 }
-function renderReaders() { const q = state.readerQuery.toLowerCase().trim(), list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))); e.readers.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); renderReaderSelector() }
-function updateReaderFields() { const student = $('#readerTypeInput').value === 'Aluno'; [['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => { const f = $(s); f.hidden = !visible; f.classList.toggle('hidden', !visible) }); $('#readerCourseInput').required = student; $('#readerRegistrationInput').required = student; $('#readerCpfInput').required = !student }
+
+function renderReaders() { 
+  if (!e.readers) return;
+  const q = state.readerQuery.toLowerCase().trim(), list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))); 
+  e.readers.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
+  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
+  $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
+  renderReaderSelector() 
+}
+
+function updateReaderFields() { 
+  const typeSelect = $('#readerTypeInput');
+  if (!typeSelect) return;
+  const student = typeSelect.value === 'Aluno'; 
+  [['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => { 
+    const f = $(s); 
+    if (f) {
+      f.hidden = !visible; 
+      f.classList.toggle('hidden', !visible) 
+    }
+  }); 
+  if ($('#readerCourseInput')) $('#readerCourseInput').required = student; 
+  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').required = student; 
+  if ($('#readerCpfInput')) $('#readerCpfInput').required = !student 
+}
+
 function tab(name) { $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name)); $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === name)) }
-function openForm(name, panel, input) { tab(name); $(panel).classList.remove('hidden'); $(input).focus(); $(panel).scrollIntoView({ behavior: 'smooth', block: 'start' }) }
-function resetBookForm() { $('#bookForm').reset(); $('#bookIdInput').value = ''; $('#bookFormPanel h3').textContent = 'Cadastrar livro'; $('#saveBookBtn').textContent = 'Salvar livro'; $('#cancelBookEditBtn').classList.add('hidden'); renderCategorySelect(); $('#bookYearInput').value = new Date().getFullYear(); $('#bookQuantityInput').value = 1 }
-function resetReaderForm() { $('#readerForm').reset(); $('#readerIdInput').value = ''; $('#readerFormPanel h3').textContent = 'Cadastrar leitor'; $('#saveReaderBtn').textContent = 'Salvar leitor'; $('#cancelReaderEditBtn').classList.add('hidden'); updateReaderFields() }
-function editBook(id) { const book = state.books.find((item) => item.id === id); if (!book) return; openForm('acervo', '#bookFormPanel', '#bookTitleInput'); $('#bookIdInput').value = id; $('#bookTitleInput').value = book.title || ''; $('#bookAuthorInput').value = book.author || ''; $('#bookPublisherInput').value = book.publisher || ''; $('#bookCategoryInput').value = book.categoryId || ''; $('#bookYearInput').value = book.year || ''; $('#bookShelfInput').value = book.shelf || ''; $('#bookQuantityInput').value = Number(book.total || 1); $('#bookTombamentoInput').value = book.tombamento || ''; $('#bookFormPanel h3').textContent = 'Editar livro'; $('#saveBookBtn').textContent = 'Atualizar livro'; $('#cancelBookEditBtn').classList.remove('hidden') }
-function editReader(id) { const reader = state.readers.find((item) => item.id === id); if (!reader) return; openForm('leitores', '#readerFormPanel', '#readerNameInput'); $('#readerIdInput').value = id; $('#readerNameInput').value = reader.name || ''; $('#readerTypeInput').value = reader.type || 'Aluno'; $('#readerCourseInput').value = reader.course || ''; $('#readerRegistrationInput').value = reader.matricula || ''; $('#readerCpfInput').value = reader.cpf || ''; $('#readerEmailInput').value = reader.email || ''; $('#readerPhoneInput').value = reader.phone || ''; $('#readerFormPanel h3').textContent = 'Editar leitor'; $('#saveReaderBtn').textContent = 'Atualizar leitor'; $('#cancelReaderEditBtn').classList.remove('hidden'); updateReaderFields() }
+
+function resetBookForm() { 
+  const form = $('#bookForm');
+  if (form) form.reset(); 
+  if ($('#bookIdInput')) $('#bookIdInput').value = ''; 
+  const titleHeader = $('#bookModalTitle');
+  if (titleHeader) titleHeader.textContent = 'Cadastrar livro'; 
+  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Salvar livro'; 
+  renderCategorySelect(); 
+  if ($('#bookYearInput')) $('#bookYearInput').value = new Date().getFullYear(); 
+  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = 1 
+}
+
+function resetReaderForm() { 
+  const form = $('#readerForm');
+  if (form) form.reset(); 
+  if ($('#readerIdInput')) $('#readerIdInput').value = ''; 
+  const titleHeader = $('#readerModalTitle');
+  if (titleHeader) titleHeader.textContent = 'Cadastrar leitor'; 
+  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Salvar leitor'; 
+  updateReaderFields() 
+}
+
+function editBook(id) { 
+  const book = state.books.find((item) => item.id === id); 
+  if (!book) return; 
+  if ($('#bookIdInput')) $('#bookIdInput').value = id; 
+  if ($('#bookTitleInput')) $('#bookTitleInput').value = book.title || ''; 
+  if ($('#bookAuthorInput')) $('#bookAuthorInput').value = book.author || ''; 
+  if ($('#bookPublisherInput')) $('#bookPublisherInput').value = book.publisher || ''; 
+  if ($('#bookCategoryInput')) $('#bookCategoryInput').value = book.categoryId || ''; 
+  if ($('#bookYearInput')) $('#bookYearInput').value = book.year || ''; 
+  if ($('#bookShelfInput')) $('#bookShelfInput').value = book.shelf || ''; 
+  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = Number(book.total || 1); 
+  if ($('#bookTombamentoInput')) $('#bookTombamentoInput').value = book.tombamento || ''; 
+  
+  const titleHeader = $('#bookModalTitle');
+  if (titleHeader) titleHeader.textContent = 'Editar livro'; 
+  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Atualizar livro'; 
+  modal('bookFormModal', true);
+}
+
+function editReader(id) { 
+  const reader = state.readers.find((item) => item.id === id); 
+  if (!reader) return; 
+  if ($('#readerIdInput')) $('#readerIdInput').value = id; 
+  if ($('#readerNameInput')) $('#readerNameInput').value = reader.name || ''; 
+  if ($('#readerTypeInput')) $('#readerTypeInput').value = reader.type || 'Aluno'; 
+  if ($('#readerCourseInput')) $('#readerCourseInput').value = reader.course || ''; 
+  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').value = reader.matricula || ''; 
+  if ($('#readerCpfInput')) $('#readerCpfInput').value = reader.cpf || ''; 
+  if ($('#readerEmailInput')) $('#readerEmailInput').value = reader.email || ''; 
+  if ($('#readerPhoneInput')) $('#readerPhoneInput').value = reader.phone || ''; 
+  
+  const titleHeader = $('#readerModalTitle');
+  if (titleHeader) titleHeader.textContent = 'Editar leitor'; 
+  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Atualizar leitor'; 
+  updateReaderFields();
+  modal('readerFormModal', true);
+}
 
 async function addBook(event) {
   event.preventDefault()
   const button = $('#bookForm button[type="submit"]')
-  const editingId = $('#bookIdInput').value
-  const categoryId = $('#bookCategoryInput').value
-  const selectedCategory = getCategoryOptions().find((c) => c.id === categoryId)
-  const title = $('#bookTitleInput').value.trim()
-  const author = $('#bookAuthorInput').value.trim()
-  const publisher = $('#bookPublisherInput').value.trim()
+  const editingId = $('#bookIdInput')?.value
+  const categoryId = $('#bookCategoryInput')?.value
+  const selectedCategory = getCategoryOptions().find((c) => c.id === categoryId || c.code === categoryId)
+  const title = $('#bookTitleInput')?.value.trim()
+  const author = $('#bookAuthorInput')?.value.trim()
+  const publisher = $('#bookPublisherInput')?.value.trim()
   const existingBook = editingId ? state.books.find((item) => item.id === editingId) : null
   const existingMeta = editingId ? { synopsis: existingBook?.synopsis || '', coverUrl: existingBook?.coverUrl || '' } : await lookupBookMetadata(title, author, publisher)
   const book = {
@@ -316,35 +418,33 @@ async function addBook(event) {
     author,
     publisher,
     categoryId,
-    year: Number($('#bookYearInput').value),
-    shelf: $('#bookShelfInput').value.trim(),
-    total: Number($('#bookQuantityInput').value),
-    tombamento: $('#bookTombamentoInput').value.trim(),
+    year: Number($('#bookYearInput')?.value || 2026),
+    shelf: $('#bookShelfInput')?.value.trim() || '',
+    total: Number($('#bookQuantityInput')?.value || 1),
+    tombamento: $('#bookTombamentoInput')?.value.trim() || '',
     synopsis: existingMeta.synopsis,
     coverUrl: existingMeta.coverUrl
   }
   const borrowedCopies = existingBook ? Number(existingBook.total || 0) - Number(existingBook.available || 0) : 0
-  if (!book.title || !book.author || !Number.isInteger(book.total) || book.total < 1 || !selectedCategory || book.total < borrowedCopies) return toast(book.total < borrowedCopies ? `A quantidade não pode ser menor que os ${borrowedCopies} exemplares emprestados.` : 'Preencha título, autor, categoria e quantidade válida.', 'error')
+  if (!book.title || !book.author || !Number.isInteger(book.total) || book.total < 1 || book.total < borrowedCopies) return toast(book.total < borrowedCopies ? `A quantidade não pode ser menor que os ${borrowedCopies} exemplares emprestados.` : 'Preencha título, autor, categoria e quantidade válida.', 'error')
 
   loading(button, true, 'Salvando…')
 
   try {
     if (editingId) {
       const availableCopies = book.total - borrowedCopies
-      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory.name, updatedAt: serverTimestamp() })
+      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory?.name || categoryId, updatedAt: serverTimestamp() })
       await logAudit('book_updated', { bookId: editingId, total: book.total }, state.user?.uid || null)
       resetBookForm()
+      modal('bookFormModal', false)
       toast('Livro atualizado com sucesso.')
       return
     }
 
-    const categorySelect = $('#bookCategoryInput')
-    const prefix = String(categorySelect?.value || 'GE').trim().toUpperCase()
-    const categoriesList = state?.categories || []
-    const selectedCategory = categoriesList.find((c) => String(c.code || c.id).toUpperCase() === prefix)
+    const prefix = String(categoryId || 'GE').trim().toUpperCase()
     const categoryName = selectedCategory?.name || prefix
     const counterRef = doc(db, 'counters', `books_${prefix}`)
-      await runTransaction(db, async (tx) => {
+    await runTransaction(db, async (tx) => {
       const counterSnap = await tx.get(counterRef)
       const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
       const nextCodeNumber = lastCode + 1
@@ -370,14 +470,16 @@ async function addBook(event) {
     
     await logAudit('book_created', { title: book.title, categoryId: book.categoryId, total: book.total }, state.user?.uid || null)
     resetBookForm()
+    modal('bookFormModal', false)
     toast('Livro cadastrado com sucesso.')
   } catch (err) { error(err, 'Não foi possível salvar o livro.') } finally { loading(button, false) }
 }
+
 async function addCategory(event) {
   event.preventDefault()
   const button = $('#categoryForm button[type="submit"]')
-  const name = $('#categoryNameInput').value.trim()
-  const code = $('#categoryCodeInput').value.trim()
+  const name = $('#categoryNameInput')?.value.trim()
+  const code = $('#categoryCodeInput')?.value.trim()
   if (!name || !code) return toast('Informe nome e código da categoria.', 'error')
   const normalizedCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
   if (!normalizedCode) return toast('Código inválido para categoria.', 'error')
@@ -386,9 +488,14 @@ async function addCategory(event) {
   try {
     const categoryRef = doc(db, 'categories', normalizedCode)
     await setDoc(categoryRef, { id: normalizedCode, name, code: normalizedCode, schoolId: config.currentSchoolId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })
-    $('#categoryForm').reset(); renderCategorySelect(); renderCategoryList(); toast('Categoria salva com sucesso.')
+    if ($('#categoryForm')) $('#categoryForm').reset(); 
+    renderCategorySelect(); 
+    renderCategoryList(); 
+    modal('categoryModal', false);
+    toast('Categoria salva com sucesso.')
   } catch (err) { error(err, 'Não foi possível salvar a categoria.') } finally { loading(button, false) }
 }
+
 async function removeCategory(id) {
   if (!confirm('Apagar esta categoria?')) return
   try {
@@ -396,23 +503,24 @@ async function removeCategory(id) {
     toast('Categoria apagada.')
   } catch (err) { error(err, 'Não foi possível apagar a categoria.') }
 }
+
 async function addReader(event) {
   event.preventDefault()
   const button = $('#readerForm button[type="submit"]')
-  const editingId = $('#readerIdInput').value
-  const type = $('#readerTypeInput').value
+  const editingId = $('#readerIdInput')?.value
+  const type = $('#readerTypeInput')?.value || 'Aluno'
   const role = type === 'Professor' ? 'teacher' : type === 'Responsável' ? 'guardian' : 'student'
   const reader = {
     schoolId: config.currentSchoolId,
-    name: $('#readerNameInput').value.trim(),
+    name: $('#readerNameInput')?.value.trim(),
     type,
     role,
-    class: type === 'Aluno' ? $('#readerCourseInput').value.trim() : '',
-    course: type === 'Aluno' ? $('#readerCourseInput').value.trim() : '',
-    matricula: type === 'Aluno' ? $('#readerRegistrationInput').value.trim() : '',
-    cpf: type !== 'Aluno' ? $('#readerCpfInput').value.trim() : '',
-    email: $('#readerEmailInput').value.trim(),
-    phone: $('#readerPhoneInput').value.trim()
+    class: type === 'Aluno' ? $('#readerCourseInput')?.value.trim() : '',
+    course: type === 'Aluno' ? $('#readerCourseInput')?.value.trim() : '',
+    matricula: type === 'Aluno' ? $('#readerRegistrationInput')?.value.trim() : '',
+    cpf: type !== 'Aluno' ? $('#readerCpfInput')?.value.trim() : '',
+    email: $('#readerEmailInput')?.value.trim(),
+    phone: $('#readerPhoneInput')?.value.trim()
   }
   if (!reader.name || !reader.email || !reader.phone || (type === 'Aluno' && (!reader.course || !reader.matricula)) || (type !== 'Aluno' && !reader.cpf)) return toast('Preencha todos os campos obrigatórios.', 'error')
   loading(button, true, editingId ? 'Atualizando…' : 'Salvando…')
@@ -420,30 +528,35 @@ async function addReader(event) {
     if (editingId) {
       await updateDoc(doc(db, 'readers', editingId), { ...reader, updatedAt: serverTimestamp() })
       resetReaderForm()
+      modal('readerFormModal', false)
       toast('Leitor atualizado com sucesso.')
     } else {
       await addDoc(collection(db, 'readers'), { ...reader, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
       resetReaderForm()
+      modal('readerFormModal', false)
       toast('Leitor cadastrado com sucesso.')
     }
   } catch (err) { error(err, 'Não foi possível salvar o leitor.') } finally { loading(button, false) }
 }
+
 async function removeBook(id) {
   if (state.loans.some((loan) => loan.bookId === id && loan.status === 'active')) return toast('Não é possível apagar um livro com empréstimo ativo.', 'error')
   if (!confirm('Apagar este livro do acervo?')) return
   try { await deleteDoc(doc(db, 'books', id)); toast('Livro apagado.') } catch (err) { error(err, 'Não foi possível apagar o livro.') }
 }
+
 async function removeReader(id) {
   if (state.loans.some((loan) => loan.readerId === id && loan.status === 'active')) return toast('Não é possível apagar um leitor com empréstimo ativo.', 'error')
   if (!confirm('Apagar este leitor?')) return
   try { await deleteDoc(doc(db, 'readers', id)); toast('Leitor apagado.') } catch (err) { error(err, 'Não foi possível apagar o leitor.') }
 }
+
 async function registerLoan() {
   const button = $('#registerLoanBtn')
-  const code = $('#bookCodeInput').value.trim().toUpperCase()
-  const text = $('#readerInput').value.trim()
-  const selectedReaderId = $('#readerSelectInput').value
-  const days = Number($('#loanDays').value)
+  const code = $('#bookCodeInput')?.value.trim().toUpperCase()
+  const text = $('#readerInput')?.value.trim()
+  const selectedReaderId = $('#readerSelectInput')?.value
+  const days = Number($('#loanDays')?.value || 7)
   const book = state.books.find((b) => b.code?.toUpperCase() === code)
   const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text.toLowerCase())
 
@@ -453,11 +566,6 @@ async function registerLoan() {
 
   const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
   const loanLimit = getLoanLimitForReader(reader)
-
-  console.log('--- DIAGNÓSTICO DE EMPRÉSTIMO ---')
-  console.log('Leitor selecionado:', reader)
-  console.log('Limite calculado:', loanLimit)
-  console.log('Empréstimos ativos encontrados no state:', activeLoansForReader)
 
   if (activeLoansForReader.length >= loanLimit) {
     return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
@@ -517,9 +625,9 @@ async function registerLoan() {
     })
 
     await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
-    $('#bookCodeInput').value = ''
-    $('#readerInput').value = ''
-    $('#readerSelectInput').value = ''
+    if ($('#bookCodeInput')) $('#bookCodeInput').value = ''
+    if ($('#readerInput')) $('#readerInput').value = ''
+    if ($('#readerSelectInput')) $('#readerSelectInput').value = ''
     toast('Empréstimo registrado.')
   } catch (err) {
     if (err.message === 'indisponível') {
@@ -531,7 +639,9 @@ async function registerLoan() {
     loading(button, false)
   }
 }
+
 async function returnLoan(id) { try { await runTransaction(db, async (tx) => { const loanRef = doc(db, 'loans', id), loan = await tx.get(loanRef); if (!loan.exists() || loan.data().status !== 'active') throw new Error('inválido'); const bookRef = doc(db, 'books', loan.data().bookId), book = await tx.get(bookRef); tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp() }); if (book.exists()) { const free = Math.min(Number(book.data().available || 0) + 1, Number(book.data().total || 0)); tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp() }) } }); await logAudit('loan_returned', { loanId: id }, state.user?.uid || null); toast('Livro devolvido.') } catch (err) { error(err, 'Não foi possível registrar a devolução.') } }
+
 async function renewLoan(id) {
   const loan = state.loans.find((l) => l.id === id)
   if (!loan) return
@@ -545,7 +655,16 @@ async function renewLoan(id) {
     toast(`Renovação concluída por ${days} dias.`)
   } catch (err) { error(err, 'Não foi possível renovar o empréstimo.') }
 }
-function notify(id) { const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); if (!loan) return; $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`; const modalEl = $('#notificationModal'); modalEl.dataset.loanId = String(id); modal('notificationModal', true) }
+
+function notify(id) { 
+  const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); 
+  if (!loan) return; 
+  if ($('#notificationContact')) $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; 
+  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`; 
+  const modalEl = $('#notificationModal'); 
+  if (modalEl) modalEl.dataset.loanId = String(id); 
+  modal('notificationModal', true) 
+}
 
 let qrScannerStream = null
 let qrScanFrame = null
@@ -571,7 +690,7 @@ async function startQrScanner() {
     qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
     video.srcObject = qrScannerStream
     await video.play()
-    status.textContent = 'Aponte a câmera para o código do livro.'
+    if (status) status.textContent = 'Aponte a câmera para o código do livro.'
     const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
     const scan = async () => {
       if (!qrScannerStream) return
@@ -579,7 +698,7 @@ async function startQrScanner() {
         const codes = await detector.detect(video)
         const code = codes.find((item) => item.rawValue)?.rawValue
         if (code) {
-          $('#bookCodeInput').value = code.trim().toUpperCase()
+          if ($('#bookCodeInput')) $('#bookCodeInput').value = code.trim().toUpperCase()
           stopQrScanner()
           modal('qrScannerModal', false)
           toast('ID do livro preenchido pelo QR code.')
@@ -640,19 +759,19 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
   try {
     window.emailjs.init({ publicKey })
     await window.emailjs.send(serviceId, templateId, {
-    to_email: email,                                   
-    to_name: recipient?.name || reader?.name || 'Leitor',
-    subject: 'Aviso da Biblioteca',                      
-    message: message,                                   
-    school_name: config.schoolName,                     
-    escola: config.schoolName,                          
-    organization: config.organizationName,              
-    name: reader?.name || 'Leitor',                     
-    livro: loan?.bookTitle || '',                      
-    loan_days: Number(loan?.days || 0),                
-    data_vencimento: dueDate,                           
-    date: dueDate,                                      
-    dias_atraso: diasAtraso                            
+      to_email: email,                                   
+      to_name: recipient?.name || reader?.name || 'Leitor',
+      subject: 'Aviso da Biblioteca',                      
+      message: message,                                   
+      school_name: config.schoolName,                     
+      escola: config.schoolName,                          
+      organization: config.organizationName,              
+      name: reader?.name || 'Leitor',                     
+      livro: loan?.bookTitle || '',                      
+      loan_days: Number(loan?.days || 0),                
+      data_vencimento: dueDate,                           
+      date: dueDate,                                      
+      dias_atraso: diasAtraso                            
     })
     return true
   } catch (error) {
@@ -664,10 +783,10 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
 
 async function triggerNotification(type) {
   const notificationModal = $('#notificationModal')
-  const loanId = notificationModal.dataset.loanId
+  const loanId = notificationModal?.dataset.loanId
   const loan = state.loans.find((item) => item.id === loanId)
   const reader = state.readers.find((item) => item.id === loan?.readerId)
-  const message = $('#notificationMessage').value.trim()
+  const message = $('#notificationMessage')?.value.trim()
 
   if (!loan || !reader || !message) {
     return toast('Não foi possível enviar a notificação. Empréstimo ou leitor não encontrado.', 'error')
@@ -675,8 +794,6 @@ async function triggerNotification(type) {
 
   if (type === 'coordination') {
     const coordEmail = (config.coordinationEmail || $('#coordinationEmailInput')?.value || '').trim()
-
-    console.log('E-mail da Coordenação encontrado:', coordEmail)
 
     if (!coordEmail) {
       return toast('Cadastre e salve o e-mail da coordenação nas configurações da escola.', 'error')
@@ -688,7 +805,6 @@ async function triggerNotification(type) {
     }
 
     const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
-
     const templateId = config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId
 
     const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, templateId)
@@ -708,9 +824,6 @@ async function triggerNotification(type) {
     return
   }
 
-  console.log('Leitor selecionado:', reader)
-  console.log('E-mail do Leitor encontrado:', reader?.email)
-
   if (!reader.email || !reader.email.trim()) {
     return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
   }
@@ -723,8 +836,10 @@ async function triggerNotification(type) {
 }
 
 const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
+
 function exportCsv() { const csv = bookExportRows().map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
 function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
+
 const normalizeCsvHeader = (value) => String(value ?? '').replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 const csvHeaderAliases = {
   codigo: ['codigo', 'codigo do livro', 'codigo do acervo', 'id', 'id do livro', 'cod'],
@@ -738,6 +853,7 @@ const csvHeaderAliases = {
   total: ['total', 'quantidade', 'quantidade total', 'quantidade de exemplares', 'exemplares'],
   tombamento: ['tombamento', 'numero de tombamento', 'patrimonio']
 }
+
 function mapCsvColumns(headers) {
   const columns = {}
   headers.forEach((header, index) => {
@@ -747,7 +863,9 @@ function mapCsvColumns(headers) {
   })
   return columns
 }
+
 function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) ? number : null }
+
 async function importCsv(event) {
   const input = event.target
   const file = input.files?.[0]
@@ -851,7 +969,7 @@ async function importCsv(event) {
     if (errors.length) return toast(`Corrija as linhas inválidas: ${errors.slice(0, 4).join('; ')}${errors.length > 4 ? '; …' : ''}. Nada foi importado.`, 'error')
     if (!booksToImport.length) return toast(skipped.length ? `Nenhum livro novo. ${skipped.length} código(s) já existiam no acervo.` : 'Nenhum livro válido para importar.', 'error')
     pendingCsvImport = { books: booksToImport, counters: countersToUpdate, skippedCount: skipped.length }
-    $('#importCsvSummary').textContent = `Importar ${booksToImport.length} livro(s)? Códigos já existentes serão ignorados.`
+    if ($('#importCsvSummary')) $('#importCsvSummary').textContent = `Importar ${booksToImport.length} livro(s)? Códigos já existentes serão ignorados.`
     modal('importCsvConfirmModal', true)
   } catch (err) {
     error(err, 'Não foi possível ler ou validar o CSV.')
@@ -894,6 +1012,7 @@ async function confirmCsvImport() {
     loading(button, false)
   }
 }
+
 function subscribeBooks() {
   if (!canUseFirebase || !db) return
   state.publicUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
@@ -906,6 +1025,7 @@ function subscribeBooks() {
     renderPublicBooks(); renderBooks(); renderDashboard()
   }, (err) => error(err)))
 }
+
 function subscribeCategories() {
   if (!canUseFirebase || !db) return
   state.publicUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
@@ -918,8 +1038,10 @@ function subscribeCategories() {
     renderDashboard();
   }, (err) => error(err)))
 }
+
 function clearPublicSubscriptions() { while (state.publicUnsubs.length) state.publicUnsubs.pop()() }
 function clearAdminSubscriptions() { while (state.adminUnsubs.length) state.adminUnsubs.pop()() }
+
 function subscribeAdmin() {
   if (!canUseFirebase || !db || !auth) return
   clearAdminSubscriptions();
@@ -927,14 +1049,19 @@ function subscribeAdmin() {
   state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => { state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderReaders(); renderDashboard() }, (err) => error(err)));
   state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => { state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderLoans(); renderDashboard() }, (err) => error(err)))
 }
-function view(name) { $('#publicView').classList.toggle('is-active', name === 'public'); $('#adminView').classList.toggle('is-active', name === 'admin'); $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name)) }
+
+function view(name) { 
+  if ($('#publicView')) $('#publicView').classList.toggle('is-active', name === 'public'); 
+  if ($('#adminView')) $('#adminView').classList.toggle('is-active', name === 'admin'); $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name)) 
+}
+
 async function saveSchoolSettings(event) {
   event.preventDefault()
   if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
 
-  const coordinationEmail = $('#coordinationEmailInput').value.trim()
-  const reminderDays = Number($('#reminderDaysInput').value || 1)
-  const coordinationDays = Number($('#coordinationDaysInput').value || 7)
+  const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
+  const reminderDays = Number($('#reminderDaysInput')?.value || 1)
+  const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
 
   const maxBooksStudent = Number($('#maxBooksStudentInput')?.value || config.maxBooksStudent || 2)
   const maxBooksTeacher = Number($('#maxBooksTeacherInput')?.value || config.maxBooksTeacher || 35)
@@ -965,51 +1092,101 @@ async function saveSchoolSettings(event) {
     error(err, 'Não foi possível salvar as configurações da escola.')
   }
 }
-function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); $('#bookForm').onsubmit = addBook; $('#categoryForm').onsubmit = addCategory; $('#readerForm').onsubmit = addReader; $('#schoolSettingsForm').onsubmit = saveSchoolSettings; $('#readerTypeInput').onchange = updateReaderFields; $('#registerLoanBtn').onclick = registerLoan; $('#scanBtn').onclick = startQrScanner; $('#addBookBtn').onclick = () => { resetBookForm(); openForm('acervo', '#bookFormPanel', '#bookTitleInput') }; $('#addReaderBtn').onclick = () => { resetReaderForm(); openForm('leitores', '#readerFormPanel', '#readerNameInput') }; $('#cancelBookEditBtn').onclick = resetBookForm; $('#cancelReaderEditBtn').onclick = resetReaderForm; $('#exportBtn').onclick = exportCsv; $('#exportXlsxBtn').onclick = exportXlsx; $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) });$('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage').value); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); $('#sendEmailBtn').onclick = () => triggerNotification('email'); $('#logoutBtn').onclick = async () => {
-  if (!canUseFirebase || !auth) {
-    state.user = null;
-    $('#logoutBtn').classList.add('hidden');
-    view('public');
-    toast('Sessão local encerrada.');
-    return
-  }
-  try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
-};
+
+function setup() { 
+  $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$
+('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); 
+  if ($('#searchInput')) $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; 
+  if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; 
+  if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; 
+  if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; 
+  $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$
+('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); 
+  
+  if ($('#bookForm')) $('#bookForm').onsubmit = addBook; 
+  if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory; 
+  if ($('#readerForm')) $('#readerForm').onsubmit = addReader; 
+  if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings; 
+  if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields; 
+  if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan; 
+  if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner; 
+  
+  // Abertura de Modais de Cadastro
+  if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true); };
+  if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true); };
+  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true); };
+
+  if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false); 
+  if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false); 
+  if ($('#exportBtn')) $('#exportBtn').onclick = exportCsv; 
+  if ($('#exportXlsxBtn')) $('#exportXlsxBtn').onclick = exportXlsx;  $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) });
+  
+  if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; 
+  if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); 
+  if ($('#sendEmailBtn')) $('#sendEmailBtn').onclick = () => triggerNotification('email'); 
+  if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
+    if (!canUseFirebase || !auth) {
+      state.user = null;
+      if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden');
+      view('public');
+      toast('Sessão local encerrada.');
+      return
+    }
+    try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
+  };
 }
+
 syncSchoolSettingsForm()
-$('#importCsvBtn').onclick = () => modal('importCsvFileModal', true)
-$('#importCsvInput').onchange = importCsv
-const cancelCsvFileSelection = () => { $('#importCsvInput').value = ''; modal('importCsvFileModal', false) }
-$('#cancelCsvFileBtn').onclick = cancelCsvFileSelection
-$('#closeCsvFileModalBtn').onclick = cancelCsvFileSelection
+if ($('#importCsvBtn')) $('#importCsvBtn').onclick = () => modal('importCsvFileModal', true)
+if ($('#importCsvInput')) $('#importCsvInput').onchange = importCsv
+const cancelCsvFileSelection = () => { if ($('#importCsvInput')) $('#importCsvInput').value = ''; modal('importCsvFileModal', false) }
+if ($('#cancelCsvFileBtn')) $('#cancelCsvFileBtn').onclick = cancelCsvFileSelection
+if ($('#closeCsvFileModalBtn')) $('#closeCsvFileModalBtn').onclick = cancelCsvFileSelection
 const cancelCsvImport = () => { pendingCsvImport = null; modal('importCsvConfirmModal', false) }
-$('#cancelCsvImportBtn').onclick = cancelCsvImport
-$('#closeCsvImportBtn').onclick = cancelCsvImport
-$('#confirmCsvImportBtn').onclick = confirmCsvImport
-$('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
-$('#loginForm').onsubmit = async (x) => {
-  x.preventDefault();
-  const email = $('#loginForm input[type="email"]').value.trim();
-  const password = $('#loginForm input[type="password"]').value;
-  const b = $('#loginForm button[type="submit"]');
-  loading(b, true, 'Entrando…');
+if ($('#cancelCsvImportBtn')) $('#cancelCsvImportBtn').onclick = cancelCsvImport
+if ($('#closeCsvImportBtn')) $('#closeCsvImportBtn').onclick = cancelCsvImport
+if ($('#confirmCsvImportBtn')) $('#confirmCsvImportBtn').onclick = confirmCsvImport
+if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 
-  if (!canUseFirebase || !auth) {
-    toast('Firebase Auth indisponível. Verifique a configuração do projeto.', 'error');
-    loading(b, false);
-    return
-  }
+if ($('#loginForm')) {
+  $('#loginForm').onsubmit = async (x) => {
+    x.preventDefault();
+    const email = $('#loginForm input[type="email"]')?.value.trim();
+    const password = $('#loginForm input[type="password"]')?.value;
+    const b = $('#loginForm button[type="submit"]');
+    loading(b, true, 'Entrando…');
 
-  try {
-    await signInWithEmailAndPassword(auth, email, password)
-    modal('loginModal', false)
-  } catch (err) {
-    error(err)
-  } finally {
-    loading(b, false)
+    if (!canUseFirebase || !auth) {
+      toast('Firebase Auth indisponível. Verifique a configuração do projeto.', 'error');
+      loading(b, false);
+      return
+    }
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+      modal('loginModal', false)
+    } catch (err) {
+      error(err)
+    } finally {
+      loading(b, false)
+    }
+  };
+}
+
+if ($('#resetPasswordBtn')) {
+  $('#resetPasswordBtn').onclick = async () => { 
+    const email = $('#loginForm input[type="email"]')?.value.trim(); 
+    if (!email) return toast('Informe seu e-mail.', 'error'); 
+    if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa.', 'error'); 
+    try { 
+      await sendPasswordResetEmail(auth, email); 
+      toast('Se este e-mail pertencer a um administrador cadastrado, o link de recuperação foi enviado.') 
+    } catch (err) { 
+      error(err, 'Não foi possível enviar a recuperação.') 
+    } 
   }
-};
-$('#resetPasswordBtn').onclick = async () => { const email = $('#loginForm input[type="email"]').value.trim(); if (!email) return toast('Informe seu e-mail.', 'error'); if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa. Use o login de teste disponível.', 'error'); try { await sendPasswordResetEmail(auth, email); toast('Se este e-mail pertencer a um administrador cadastrado, o link de recuperação foi enviado.') } catch (err) { error(err, 'Não foi possível enviar a recuperação.') } }
+}
+
 async function init() {
   setup();
   updateReaderFields();
@@ -1017,7 +1194,7 @@ async function init() {
   if (!canUseFirebase || !db) {
     hydrateFallbackData();
     state.user = null;
-    $('#logoutBtn').classList.add('hidden');
+    if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden');
     view('public');
     return
   }
@@ -1042,13 +1219,13 @@ async function init() {
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
       syncSchoolSettingsForm()
     }
-    $('#schoolName').textContent = config.schoolName;
+    if ($('#schoolName')) $('#schoolName').textContent = config.schoolName;
   } catch (err) { error(err) }
   subscribeBooks();
   subscribeCategories();
   onAuthStateChanged(auth, async (user) => {
     state.user = user;
-    $('#logoutBtn').classList.toggle('hidden', !user);
+    if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user);
     if (user) {
       const schoolBeforeProfile = config.currentSchoolId;
       state.profile = await resolveUserSchool(user);
@@ -1081,33 +1258,4 @@ async function init() {
   })
 }
 
-document.getElementById('openBookModalBtn')?.addEventListener('click', () => {
-  document.getElementById('bookFormModal')?.classList.remove('hidden');
-});
-
-document.getElementById('openReaderModalBtn')?.addEventListener('click', () => {
-  document.getElementById('readerFormModal')?.classList.remove('hidden');
-});
-
-document.getElementById('openCategoryModalBtn')?.addEventListener('click', () => {
-  document.getElementById('categoryModal')?.classList.remove('hidden');
-});
-
-document.querySelectorAll('[data-close]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const modalId = btn.getAttribute('data-close');
-    document.getElementById(modalId)?.classList.add('hidden');
-  });
-});
-
-['bookForm', 'readerForm', 'categoryForm'].forEach(formId => {
-  document.getElementById(formId)?.addEventListener('submit', () => {
-    const targetModalMap = {
-      'bookForm': 'bookFormModal',
-      'readerForm': 'readerFormModal',
-      'categoryForm': 'categoryModal'
-    };
-    document.getElementById(targetModalMap[formId])?.classList.add('hidden');
-  });
-});
-init()
+init();
