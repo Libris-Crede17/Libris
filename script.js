@@ -11,7 +11,12 @@ const config = {
   maxBooksStudent: 2,
   maxBooksTeacher: 35,
   teacherLoanDays: 21,
-  emailjs: { serviceId: 'service_vpiw60w', studentTemplateId: 'template_s1sr3xs', coordinationTemplateId: '', publicKey: 'FS9fOYvVSD-vMtAWs' }
+  emailjs: { 
+    serviceId: 'service_vpiw60w', 
+    studentTemplateId: 'template_7jhtc1d', 
+    coordinationTemplateId: 'template_05hf89g', 
+    publicKey: 'FS9fOYvVSD-vMtAWs' 
+  }
 }
 const defaultCategories = [ ]
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
