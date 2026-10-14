@@ -531,13 +531,15 @@ async function registerLoan() {
     $('#readerInput').value = ''
     $('#readerSelectInput').value = ''
     toast('Empréstimo registrado.')
+
     catch (err) {
     if (err.message === 'indisponível') {
       toast('Livro indisponível.', 'error')
       return
     }
     error(err, 'Não foi possível registrar o empréstimo.')
-} 
+}
+}
     finally {
     loading(button, false)
   }
