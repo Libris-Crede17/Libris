@@ -647,7 +647,7 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
     return true
   } catch (error) {
     console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail pelo EmailJS. Verifique a consola.', 'error')
+    toast('Erro ao enviar e-mail.', 'error')
     return false
   }
 }
