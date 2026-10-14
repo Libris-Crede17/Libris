@@ -545,7 +545,7 @@ async function renewLoan(id) {
     toast(`Renovação concluída por ${days} dias.`)
   } catch (err) { error(err, 'Não foi possível renovar o empréstimo.') }
 }
-function notify(id) { const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); if (!loan) return; $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a ${config.schoolName}.`; const modalEl = $('#notificationModal'); modalEl.dataset.loanId = String(id); modal('notificationModal', true) }
+function notify(id) { const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); if (!loan) return; $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`; const modalEl = $('#notificationModal'); modalEl.dataset.loanId = String(id); modal('notificationModal', true) }
 
 let qrScannerStream = null
 let qrScanFrame = null
