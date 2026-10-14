@@ -531,8 +531,7 @@ async function registerLoan() {
     $('#readerInput').value = ''
     $('#readerSelectInput').value = ''
     toast('Empréstimo registrado.')
-
-    catch (err) {
+}   catch (err) {
     if (err.message === 'indisponível') {
       toast('Livro indisponível.', 'error')
       return
