@@ -669,17 +669,21 @@ async function triggerNotification(type) {
   const message = $('#notificationMessage').value.trim()
 
   if (!loan || !reader || !message) {
-    return toast('Não foi possível enviar a notificação.', 'error')
+    return toast('Não foi possível enviar a notificação. Empréstimo ou leitor não encontrado.', 'error')
   }
 
   if (type === 'coordination') {
-    if (!config.coordinationEmail) {
-      return toast('Cadastre o e-mail da coordenação nas configurações da escola.', 'error')
+    const coordEmail = (config.coordinationEmail || $('#coordinationEmailInput')?.value || '').trim()
+
+    console.log('E-mail da Coordenação encontrado:', coordEmail)
+
+    if (!coordEmail) {
+      return toast('Cadastre e salve o e-mail da coordenação nas configurações da escola.', 'error')
     }
 
     const coordination = { 
       name: 'Coordenação', 
-      email: config.coordinationEmail 
+      email: coordEmail 
     }
 
     const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
@@ -688,8 +692,7 @@ async function triggerNotification(type) {
 
     const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, templateId)
 
-    if (!sent) return toast('Não foi possível enviar o aviso à coordenação.', 'error')
-
+    if (!sent) return
     toast('Aviso enviado à coordenação com sucesso!')
     modal('notificationModal', false)
     return
@@ -697,17 +700,23 @@ async function triggerNotification(type) {
 
   if (type === 'whatsapp') {
     const sent = openWhatsAppMessage(reader, message)
-    if (!sent) return toast('Este leitor não possui telefone para WhatsApp.', 'error')
+    if (!sent) return toast('Este leitor não possui telefone cadastrado para WhatsApp.', 'error')
 
     toast('WhatsApp aberto com a mensagem.')
     modal('notificationModal', false)
     return
   }
 
+  console.log('Leitor selecionado:', reader)
+  console.log('E-mail do Leitor encontrado:', reader?.email)
+
+  if (!reader.email || !reader.email.trim()) {
+    return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
+  }
+
   const sent = await sendEmailNotification(reader, message, loan, reader, config.emailjs.studentTemplateId)
 
-  if (!sent) return toast('Este leitor não possui e-mail para envio.', 'error')
-
+  if (!sent) return
   toast('E-mail enviado ao leitor com sucesso!')
   modal('notificationModal', false)
 }
