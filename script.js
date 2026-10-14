@@ -613,7 +613,10 @@ function openWhatsAppMessage(reader, message) {
 
 async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
   const email = String(recipient?.email || '').trim()
-  if (!email) return false
+  if (!email) {
+    toast('Endereço de e-mail não informado.', 'error')
+    return false
+  }
 
   const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
   const serviceId = config.emailjs.serviceId
@@ -621,8 +624,8 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
   const dueDate = loan ? formatDate(loan.dueAt) : '—'
 
   if (!emailjsReady || !serviceId || !templateId || !publicKey) {
-    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('Aviso de biblioteca')}&body=${encodeURIComponent(message)}`
-    return true
+    toast('Serviço de e-mail não configurado corretamente.', 'error')
+    return false
   }
 
   try {
@@ -644,8 +647,8 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
     return true
   } catch (error) {
     console.error('Falha no EmailJS:', error)
-    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('Aviso de biblioteca')}&body=${encodeURIComponent(message)}`
-    return true
+    toast('Erro ao enviar e-mail.', 'error')
+    return false
   }
 }
 
