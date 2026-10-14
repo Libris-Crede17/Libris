@@ -277,21 +277,22 @@ function renderDashboard() {
     `).join('');
 
     $$('.clickable-kpi').forEach((card) => {
-      card.onclick = () => {
-        const targetTab = card.dataset.targetTab;
-        if (targetTab) {
-          const cardTitle = card.querySelector('span')?.textContent;
-          if (cardTitle === 'Livros em Atraso') {
-            state.loanFilter = 'overdue';
-          } else if (cardTitle === 'Empréstimos Ativos') {
-            state.loanFilter = 'all';
-          }
-          tab(targetTab);
-          renderLoans();
-        }
-      };
-    });
-  }
+  card.onclick = () => {
+    const targetTab = card.dataset.targetTab;
+    if (targetTab) {
+      const cardTitle = card.querySelector('span')?.textContent;
+      
+      if (cardTitle === 'Livros em Atraso') {
+        state.loanFilter = 'overdue';
+      } else if (cardTitle === 'Empréstimos Ativos') {
+        state.loanFilter = 'all';
+      }
+
+      tab(targetTab);    
+      renderLoans();    
+    }
+  };
+});
 
   renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); 
   const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; 
