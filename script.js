@@ -1081,47 +1081,33 @@ async function init() {
   })
 }
 
-function setupModalToggle(btnId, modalId) {
-  const btn = document.getElementById(btnId);
-  const modal = document.getElementById(modalId);
-  
-  if (btn && modal) {
-    btn.addEventListener('click', () => {
-      modal.classList.remove('hidden');
-      modal.setAttribute('aria-hidden', 'false');
-    });
-  }
-}
+document.getElementById('openBookModalBtn')?.addEventListener('click', () => {
+  document.getElementById('bookFormModal')?.classList.remove('hidden');
+});
 
-setupModalToggle('openBookModalBtn', 'bookFormModal');
-setupModalToggle('addBookBtn', 'bookFormModal');
-setupModalToggle('openReaderModalBtn', 'readerFormModal');
-setupModalToggle('addReaderBtn', 'readerFormModal');
-setupModalToggle('openCategoryModalBtn', 'categoryModal');
+document.getElementById('openReaderModalBtn')?.addEventListener('click', () => {
+  document.getElementById('readerFormModal')?.classList.remove('hidden');
+});
+
+document.getElementById('openCategoryModalBtn')?.addEventListener('click', () => {
+  document.getElementById('categoryModal')?.classList.remove('hidden');
+});
 
 document.querySelectorAll('[data-close]').forEach(btn => {
   btn.addEventListener('click', () => {
     const modalId = btn.getAttribute('data-close');
-    const modal = document.getElementById(modalId);
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.setAttribute('aria-hidden', 'true');
-    }
+    document.getElementById(modalId)?.classList.add('hidden');
   });
 });
 
 ['bookForm', 'readerForm', 'categoryForm'].forEach(formId => {
   document.getElementById(formId)?.addEventListener('submit', () => {
-    const modalMap = {
+    const targetModalMap = {
       'bookForm': 'bookFormModal',
       'readerForm': 'readerFormModal',
       'categoryForm': 'categoryModal'
     };
-    const modal = document.getElementById(modalMap[formId]);
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.setAttribute('aria-hidden', 'true');
-    }
+    document.getElementById(targetModalMap[formId])?.classList.add('hidden');
   });
 });
 init()
