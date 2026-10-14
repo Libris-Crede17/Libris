@@ -12,10 +12,10 @@ const config = {
   maxBooksTeacher: 35,
   teacherLoanDays: 21,
   emailjs: { 
-    serviceId: 'service_vpiw60w', 
+    serviceId: 'service_kj4o9me', 
     studentTemplateId: 'template_7jhtc1d', 
     coordinationTemplateId: 'template_05hf89g', 
-    publicKey: 'FS9fOYvVSD-vMtAWs' 
+    publicKey: 'Fm5CBo5zAj_vu2ovek' 
   }
 }
 const defaultCategories = [ ]
@@ -647,7 +647,7 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
     return true
   } catch (error) {
     console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail.', 'error')
+    toast('Erro ao enviar e-mail pelo EmailJS. Verifique a consola.', 'error')
     return false
   }
 }
