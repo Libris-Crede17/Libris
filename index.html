@@ -166,25 +166,21 @@
               </div>
 
               <div class="mt-24 panel">
-                <div class="panel-head">
-                  <h3>Empréstimos ativos</h3>
-                </div>
-                <div class="table-wrap table-responsive">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Livro</th>
-                        <th>Leitor</th>
-                        <th>Prazo</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody id="loansTableBody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+  <div class="panel-head flex-between align-center mb-3">
+    <h3>Empréstimos ativos</h3>
+
+    <!-- Caixa de Seleção do Filtro -->
+    <div class="filter-select-wrap">
+      <select id="loanFilterSelect" class="input-select">
+        <option value="all">Todos os empréstimos</option>
+        <option value="student">Apenas Alunos</option>
+        <option value="teacher">Apenas Professores</option>
+        <option value="overdue">Apenas Atrasados</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="table-wrap table-responsive">
 
             <div class="tab-panel" data-panel="acervo">
               <div class="panel panel-header-actions">
