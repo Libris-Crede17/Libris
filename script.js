@@ -1,4 +1,4 @@
-import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, serverTimestamp, Timestamp, increment } from './firebase.js'
+import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } from './firebase.js'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
 const config = {
@@ -25,6 +25,7 @@ const fallbackReaders = [ ]
 const fallbackLoans = [ ]
 const canUseFirebase = Boolean(firebaseReady && auth && db)
 const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [] }
+let pendingCsvImport = null
 
 function syncSchoolSettingsForm(data = config) {
   const coordinationEmailInput = $('#coordinationEmailInput')
@@ -721,8 +722,145 @@ async function triggerNotification(type) {
   modal('notificationModal', false)
 }
 
-function exportCsv() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])], csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
-function exportXlsx() { const rows = [['Código', 'Título', 'Autor', 'Categoria', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((b) => [b.code, b.title, b.author, label(b.categoryId), b.available, b.total, b.tombamento || ''])]; const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
+const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
+function exportCsv() { const csv = bookExportRows().map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
+function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
+const normalizeCsvHeader = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) ? number : null }
+async function importCsv(event) {
+  const input = event.target
+  const file = input.files?.[0]
+  if (!file) return
+  if (!canUseFirebase || !db || !state.user) { input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
+
+  try {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: false })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) : []
+    if (rows.length < 2) return toast('O CSV está vazio ou não contém linhas de livros.', 'error')
+
+    const headers = rows[0].map(normalizeCsvHeader)
+    const columns = Object.fromEntries(headers.map((header, index) => [header, index]))
+    const required = ['codigo', 'titulo', 'autor', 'categoria', 'total']
+    const missing = required.filter((header) => columns[header] === undefined)
+    if (missing.length) return toast(`Colunas obrigatórias ausentes: ${missing.join(', ')}.`, 'error')
+
+    const categoriesByName = new Map()
+    getCategoryOptions().forEach((category) => {
+      categoriesByName.set(normalizeCsvHeader(category.name), category)
+      categoriesByName.set(normalizeCsvHeader(category.code || category.id), category)
+    })
+    const existingCodes = new Set(state.books.map((book) => String(book.code || '').trim().toUpperCase()))
+    const seenCodes = new Set()
+    const booksToImport = []
+    const countersToUpdate = new Map()
+    const skipped = []
+    const errors = []
+    const valueAt = (row, key) => columns[key] === undefined ? '' : String(row[columns[key]] ?? '').trim()
+
+    rows.slice(1).forEach((row, index) => {
+      if (!row.some((value) => String(value ?? '').trim())) return
+      const line = index + 2
+      const code = valueAt(row, 'codigo').toUpperCase()
+      const codeParts = code.match(/^([A-Z0-9]{1,4})-(\d{4})$/)
+      const title = valueAt(row, 'titulo')
+      const author = valueAt(row, 'autor')
+      const categoryName = valueAt(row, 'categoria')
+      const category = categoriesByName.get(normalizeCsvHeader(categoryName))
+      const total = parseCsvInteger(valueAt(row, 'total'))
+      const availableValue = valueAt(row, 'disponiveis')
+      const available = availableValue ? parseCsvInteger(availableValue) : total
+      const yearValue = valueAt(row, 'ano')
+      const year = yearValue ? parseCsvInteger(yearValue) : 0
+
+      const rowErrors = []
+      if (!codeParts) rowErrors.push('código deve seguir PREFIXO-0001')
+      if (!title) rowErrors.push('título ausente')
+      if (!author) rowErrors.push('autor ausente')
+      if (!category) rowErrors.push(`categoria não cadastrada: ${categoryName || 'vazia'}`)
+      if (total === null || total < 1) rowErrors.push('total inválido')
+      if (available === null || available > total) rowErrors.push('disponíveis deve estar entre 0 e o total')
+      if (year === null) rowErrors.push('ano inválido')
+      if (codeParts && category && codeParts[1] !== String(category.code || category.id).toUpperCase()) rowErrors.push('prefixo do código não corresponde à categoria')
+      if (rowErrors.length) {
+        errors.push(`linha ${line} (${rowErrors.join(', ')})`)
+        return
+      }
+      if (seenCodes.has(code)) {
+        errors.push(`linha ${line} (código repetido no arquivo: ${code})`)
+        return
+      }
+      seenCodes.add(code)
+      if (existingCodes.has(code)) {
+        skipped.push(code)
+        return
+      }
+
+      booksToImport.push({
+        code,
+        title,
+        author,
+        publisher: valueAt(row, 'editora'),
+        categoryId: String(category.code || category.id),
+        categoryName: category.name,
+        year,
+        shelf: valueAt(row, 'localizacao'),
+        available,
+        total,
+        tombamento: valueAt(row, 'tombamento'),
+        status: available > 0 ? 'disponivel' : 'emprestado',
+        schoolId: config.currentSchoolId
+      })
+      const [prefix, codeNumber] = [codeParts[1], Number(codeParts[2])]
+      countersToUpdate.set(prefix, Math.max(countersToUpdate.get(prefix) || 0, codeNumber))
+    })
+
+    if (errors.length) return toast(`Corrija as linhas inválidas: ${errors.slice(0, 4).join('; ')}${errors.length > 4 ? '; …' : ''}. Nada foi importado.`, 'error')
+    if (!booksToImport.length) return toast(skipped.length ? `Nenhum livro novo. ${skipped.length} código(s) já existiam no acervo.` : 'Nenhum livro válido para importar.', 'error')
+    pendingCsvImport = { books: booksToImport, counters: countersToUpdate, skippedCount: skipped.length }
+    $('#importCsvSummary').textContent = `Importar ${booksToImport.length} livro(s)? Códigos já existentes serão ignorados.`
+    modal('importCsvConfirmModal', true)
+  } catch (err) {
+    error(err, 'Não foi possível ler ou validar o CSV.')
+  } finally {
+    input.value = ''
+  }
+}
+
+async function confirmCsvImport() {
+  const pending = pendingCsvImport
+  if (!pending || !state.user || !canUseFirebase || !db) return
+  const button = $('#confirmCsvImportBtn')
+  loading(button, true, 'Importando…')
+
+  try {
+    for (const [prefix, importedLastCode] of pending.counters) {
+      const counterRef = doc(db, 'counters', `books_${prefix}`)
+      await runTransaction(db, async (transaction) => {
+        const counter = await transaction.get(counterRef)
+        const lastCode = Number(counter.exists() ? counter.data().lastCode || 0 : 0)
+        if (importedLastCode > lastCode) transaction.set(counterRef, { prefix, lastCode: importedLastCode, updatedAt: serverTimestamp() }, { merge: true })
+      })
+    }
+
+    for (let offset = 0; offset < pending.books.length; offset += 450) {
+      const batch = writeBatch(db)
+      pending.books.slice(offset, offset + 450).forEach((book) => {
+        batch.set(doc(collection(db, 'books')), { ...book, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+      })
+      await batch.commit()
+    }
+
+    await logAudit('books_imported', { count: pending.books.length }, state.user.uid)
+    toast(`${pending.books.length} livro(s) importado(s). ${pending.skippedCount} código(s) já existente(s) ignorado(s).`)
+    pendingCsvImport = null
+    modal('importCsvConfirmModal', false)
+  } catch (err) {
+    error(err, 'Não foi possível importar o CSV.')
+  } finally {
+    loading(button, false)
+  }
+}
 function subscribeBooks() {
   if (!canUseFirebase || !db) return
   state.publicUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
@@ -806,6 +944,12 @@ function setup() { $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.vie
 };
 }
 syncSchoolSettingsForm()
+$('#importCsvBtn').onclick = () => $('#importCsvInput').click()
+$('#importCsvInput').onchange = importCsv
+const cancelCsvImport = () => { pendingCsvImport = null; modal('importCsvConfirmModal', false) }
+$('#cancelCsvImportBtn').onclick = cancelCsvImport
+$('#closeCsvImportBtn').onclick = cancelCsvImport
+$('#confirmCsvImportBtn').onclick = confirmCsvImport
 $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 $('#loginForm').onsubmit = async (x) => {
   x.preventDefault();

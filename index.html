@@ -85,8 +85,10 @@
               <p class="eyebrow" id="schoolName" style="margin-top:0.4rem; background:rgba(52,160,96,0.08);">Biblioteca escolar</p>
             </div>
             <div class="action-row">
+              <button class="btn btn-secondary" id="importCsvBtn" type="button">Importar CSV</button>
               <button class="btn btn-secondary" id="exportBtn" type="button">Exportar CSV</button>
               <button class="btn btn-secondary" id="exportXlsxBtn" type="button">Exportar XLSX</button>
+              <input id="importCsvInput" class="hidden" type="file" accept=".csv,text/csv" />
             </div>
           </div>
 
@@ -436,6 +438,19 @@
           <button class="btn btn-primary" type="submit">Entrar no painel</button>
           <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
         </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="importCsvConfirmModal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="importCsvConfirmTitle">
+        <button class="modal-close" id="closeCsvImportBtn" type="button" aria-label="Cancelar importação">×</button>
+        <h3 id="importCsvConfirmTitle">Confirmar importação</h3>
+        <p id="importCsvSummary"></p>
+        <div class="action-row">
+          <button class="btn btn-secondary" id="cancelCsvImportBtn" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="confirmCsvImportBtn" type="button">Importar</button>
+        </div>
       </div>
     </div>
 
