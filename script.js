@@ -725,7 +725,28 @@ async function triggerNotification(type) {
 const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
 function exportCsv() { const csv = bookExportRows().map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
 function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
-const normalizeCsvHeader = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+const normalizeCsvHeader = (value) => String(value ?? '').replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const csvHeaderAliases = {
+  codigo: ['codigo', 'codigo do livro', 'codigo do acervo', 'id', 'id do livro', 'cod'],
+  titulo: ['titulo', 'titulo do livro', 'nome do livro', 'livro'],
+  autor: ['autor', 'nome do autor'],
+  editora: ['editora', 'publisher'],
+  categoria: ['categoria', 'genero', 'assunto'],
+  ano: ['ano', 'ano de publicacao', 'ano publicacao'],
+  localizacao: ['localizacao', 'estante', 'prateleira', 'local'],
+  disponiveis: ['disponiveis', 'quantidade disponivel', 'exemplares disponiveis'],
+  total: ['total', 'quantidade', 'quantidade total', 'quantidade de exemplares', 'exemplares'],
+  tombamento: ['tombamento', 'numero de tombamento', 'patrimonio']
+}
+function mapCsvColumns(headers) {
+  const columns = {}
+  headers.forEach((header, index) => {
+    const normalized = normalizeCsvHeader(header)
+    const field = Object.entries(csvHeaderAliases).find(([, aliases]) => aliases.includes(normalized))?.[0]
+    if (field && columns[field] === undefined) columns[field] = index
+  })
+  return columns
+}
 function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) ? number : null }
 async function importCsv(event) {
   const input = event.target
@@ -740,11 +761,22 @@ async function importCsv(event) {
     const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) : []
     if (rows.length < 2) return toast('O CSV está vazio ou não contém linhas de livros.', 'error')
 
-    const headers = rows[0].map(normalizeCsvHeader)
-    const columns = Object.fromEntries(headers.map((header, index) => [header, index]))
+    const headerRowIndex = rows.findIndex((row) => {
+      const columns = mapCsvColumns(row)
+      return columns.codigo !== undefined && columns.titulo !== undefined
+    })
+    if (headerRowIndex < 0) {
+      const preview = rows.slice(0, 3).map((row) => row.filter(Boolean).join(', ')).filter(Boolean).join(' / ')
+      return toast(`Não encontrei as colunas Código e Título. Cabeçalhos lidos: ${preview || 'nenhum'}.`, 'error')
+    }
+
+    const columns = mapCsvColumns(rows[headerRowIndex])
     const required = ['codigo', 'titulo', 'autor', 'categoria', 'total']
     const missing = required.filter((header) => columns[header] === undefined)
-    if (missing.length) return toast(`Colunas obrigatórias ausentes: ${missing.join(', ')}.`, 'error')
+    if (missing.length) {
+      const detected = rows[headerRowIndex].filter(Boolean).join(', ')
+      return toast(`Colunas obrigatórias ausentes: ${missing.join(', ')}. Cabeçalhos lidos: ${detected}.`, 'error')
+    }
 
     const categoriesByName = new Map()
     getCategoryOptions().forEach((category) => {
@@ -759,9 +791,9 @@ async function importCsv(event) {
     const errors = []
     const valueAt = (row, key) => columns[key] === undefined ? '' : String(row[columns[key]] ?? '').trim()
 
-    rows.slice(1).forEach((row, index) => {
+    rows.slice(headerRowIndex + 1).forEach((row, index) => {
       if (!row.some((value) => String(value ?? '').trim())) return
-      const line = index + 2
+      const line = headerRowIndex + index + 2
       const code = valueAt(row, 'codigo').toUpperCase()
       const codeParts = code.match(/^([A-Z0-9]{1,4})-(\d{4})$/)
       const title = valueAt(row, 'titulo')
