@@ -483,7 +483,31 @@
     </div>
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
+<div class="modal hidden" id="categoryModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close="categoryModal"></div>
+  <div class="modal-card small">
+    <button class="modal-close" type="button" data-close="categoryModal">×</button>
+    <div class="login-header">
+      <h3>Cadastrar Categoria</h3>
+    </div>
+    <form id="categoryForm" class="login-form">
+      <label>
+        <span>Nome da categoria</span>
+        <input id="categoryNameInput" type="text" placeholder="Ex: Ficção científica" required />
+      </label>
+      <label>
+        <span>Código</span>
+        <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
+      </label>
+      <div class="action-row mt-16">
+        <button class="btn btn-secondary" type="button" data-close="categoryModal">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Salvar categoria</button>
+      </div>
+    </form>
+  </div>
+</div>
+
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="script.js"></script>
   </body>
-</html>
+</html> 
