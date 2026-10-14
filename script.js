@@ -531,17 +531,16 @@ async function registerLoan() {
     $('#readerInput').value = ''
     $('#readerSelectInput').value = ''
     toast('Empréstimo registrado.')
-
     catch (err) {
     if (err.message === 'indisponível') {
       toast('Livro indisponível.', 'error')
       return
     }
     error(err, 'Não foi possível registrar o empréstimo.')
-  } finally {
+} 
+    finally {
     loading(button, false)
   }
-}
     await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
     $('#bookCodeInput').value = ''
     $('#readerInput').value = ''
