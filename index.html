@@ -241,25 +241,31 @@
               </div>
 
               <div class="panel mt-24">
-                <div class="panel-head">
+                <div class="panel-head mb-4">
                   <h3>Categorias</h3>
                 </div>
 
-                <form id="categoryForm" class="form-grid">
-                  <label>
-                    <span>Nome da categoria</span>
-                    <input id="categoryNameInput" type="text" placeholder="Ex: Ficção científica" required />
-                  </label>
-                  <label>
-                    <span>Código</span>
-                    <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
-                  </label>
-                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                    <button class="btn btn-primary" type="submit">Salvar categoria</button>
+                <div class="dashboard-grid">
+                  <div>
+                    <form id="categoryForm" class="form-grid">
+                      <label>
+                        <span>Nome da categoria</span>
+                        <input id="categoryNameInput" type="text" placeholder="Ex: Ficção científica" required />
+                      </label>
+                      <label>
+                        <span>Código</span>
+                        <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
+                      </label>
+                      <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
+                        <button class="btn btn-primary" type="submit">Salvar categoria</button>
+                      </div>
+                    </form>
                   </div>
-                </form>
 
-                <div class="mt-24" id="categoryList"></div>
+                  <div>
+                    <div class="table-wrap table-responsive" id="categoryList"></div>
+                  </div>
+                </div>
               </div>
 
               <div class="mt-24 panel">
