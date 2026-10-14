@@ -1109,3 +1109,15 @@ td {
     flex-basis: 100%;
   }
 }
+
+.table-responsive {
+  max-height: 295px !important;
+  overflow-y: auto !important;
+}
+
+.table-responsive table thead {
+  position: sticky;
+  top: 0;
+  background-color: var(--card-bg, #1e293b);
+  z-index: 1;
+}
