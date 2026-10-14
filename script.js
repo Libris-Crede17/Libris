@@ -1080,4 +1080,48 @@ async function init() {
     }
   })
 }
+
+function setupModalToggle(btnId, modalId) {
+  const btn = document.getElementById(btnId);
+  const modal = document.getElementById(modalId);
+  
+  if (btn && modal) {
+    btn.addEventListener('click', () => {
+      modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden', 'false');
+    });
+  }
+}
+
+setupModalToggle('openBookModalBtn', 'bookFormModal');
+setupModalToggle('addBookBtn', 'bookFormModal');
+setupModalToggle('openReaderModalBtn', 'readerFormModal');
+setupModalToggle('addReaderBtn', 'readerFormModal');
+setupModalToggle('openCategoryModalBtn', 'categoryModal');
+
+document.querySelectorAll('[data-close]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const modalId = btn.getAttribute('data-close');
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  });
+});
+
+['bookForm', 'readerForm', 'categoryForm'].forEach(formId => {
+  document.getElementById(formId)?.addEventListener('submit', () => {
+    const modalMap = {
+      'bookForm': 'bookFormModal',
+      'readerForm': 'readerFormModal',
+      'categoryForm': 'categoryModal'
+    };
+    const modal = document.getElementById(modalMap[formId]);
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  });
+});
 init()
