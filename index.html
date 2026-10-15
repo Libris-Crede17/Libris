@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Libris</title>
+    <title>Libris — Painel Administrativo</title>
     <link rel="icon" type="image/png" href="Librissf.png" />
     <meta
       name="description"
-      content="Sistema escolar de biblioteca Libris."
+      content="Painel administrativo da biblioteca escolar Libris."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,60 +24,18 @@
           <div class="brand-mark" aria-label="Logo Libris"></div>
           <div>
             <p class="brand-title">Libris</p>
-            <p class="brand-subtitle">Biblioteca escolar</p>
+            <p class="brand-subtitle">Painel Administrativo</p>
           </div>
         </div>
 
-        <nav class="main-nav" aria-label="Navegação principal">
-          <button class="nav-btn is-active" data-view="public" type="button">
-            Acervo Público
-          </button>
-          <button class="nav-btn" data-view="admin" type="button">
-            Painel Admin
-          </button>
-        </nav>
-        <button class="btn btn-secondary hidden" id="logoutBtn" type="button">Sair</button>
+        <div style="display:flex; align-items:center; gap:1rem;">
+          <div id="schoolName" class="eyebrow" style="margin:0; background:rgba(52,160,96,0.06); padding:0.35rem 0.6rem; border-radius:0.6rem;">Biblioteca escolar</div>
+          <button class="btn btn-secondary" id="logoutBtn" type="button">Sair</button>
+        </div>
       </header>
 
       <main class="main-content">
-        <section id="publicView" class="view is-active">
-          <div class="hero-panel">
-            <div class="eyebrow">Acervo aberto à comunidade escolar</div>
-            <h1>Explore o acervo da biblioteca e encontre seu próximo livro</h1>
-            <p>
-              Pesquise por título, categoria ou código do livro, filtre por
-              disponibilidade e confira a localização física dos exemplares.
-            </p>
-
-            <div class="search-row">
-              <div class="search-input-wrap">
-                <span class="icon">⌕</span>
-                <input
-                  id="searchInput"
-                  type="search"
-                  placeholder="Buscar por título, categoria ou código…"
-                  aria-label="Buscar livros"
-                />
-              </div>
-
-              <div class="toggle-group" aria-label="Filtrar por disponibilidade">
-                <button class="filter-btn is-active" data-status="all" type="button">Todos</button>
-                <button class="filter-btn" data-status="disponivel" type="button">Disponíveis</button>
-                <button class="filter-btn" data-status="emprestado" type="button">Emprestados</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="category-header">
-            <span>Categoria:</span>
-            <div id="categoryFilters" class="category-filters"></div>
-          </div>
-
-          <div id="resultsMeta" class="results-meta"></div>
-          <div id="bookGrid" class="book-grid"></div>
-        </section>
-
-        <section id="adminView" class="view">
+        <section id="adminView" class="view is-active">
           <div class="admin-header">
             <div>
               <p class="eyebrow">Menu Administrativo</p>
@@ -139,7 +97,7 @@
                   <label>
                     <span>ID do livro</span>
                     <div class="input-row">
-                      <input id="bookCodeInput" type="text" placeholder="Ex: 01-0042" />
+                      <input id="bookCodeInput" type="text" placeholder="Ex: GE-0001" />
                       <button type="button" class="btn btn-ghost" id="scanBtn">Escanear QR code</button>
                     </div>
                   </label>
@@ -314,7 +272,7 @@
       </main>
     </div>
 
-    <!-- MODAIS EXISTENTES -->
+    <!-- MODAIS ADMINISTRATIVOS (mantidos) -->
     <div class="modal hidden" id="bookModal" aria-hidden="true">
       <div class="modal-backdrop" data-close="bookModal"></div>
       <div class="modal-card">
@@ -353,7 +311,7 @@
         <h3 id="importCsvFileTitle">Importar livros do acervo</h3>
         <label>
           <span>Arquivo CSV</span>
-          <input id="importCsvInput" type="file" accept=".csv,text/csv" />
+          <input id="importCsvInput" type="file" accept=".csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
         </label>
         <div class="action-row">
           <button class="btn btn-secondary" id="cancelCsvFileBtn" type="button">Cancelar</button>
@@ -401,7 +359,7 @@
       </div>
     </div>
 
-    <!-- NOVOS MODAIS DE CADASTRO -->
+    <!-- FORMULÁRIOS DE CADASTRO -->
     <div class="modal hidden" id="bookFormModal" aria-hidden="true">
       <div class="modal-backdrop" data-close="bookFormModal"></div>
       <div class="modal-card">
