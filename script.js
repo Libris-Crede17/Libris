@@ -343,7 +343,7 @@ function renderLoans() {
   }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
 
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); 
-  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew));$$
+  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew));
 ('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify));
 
   const filterSelect = $('#loanFilterSelect')
