@@ -3,7 +3,17 @@ const path = require('path')
 
 const root = __dirname
 const output = path.join(root, 'dist')
-const publicFiles = ['index.html', 'styles.css', 'script.js', 'firebase.js', 'Librissf.png']
+const publicFiles = [
+  'index.html',
+  'styles.css',
+  'script.js',
+  'firebase.js',
+  'Librissf.png',
+  'manifest.webmanifest',
+  'sw.js',
+  'icons/libris-192.png',
+  'icons/libris-512.png'
+]
 
 fs.mkdirSync(output, { recursive: true })
 
@@ -13,6 +23,7 @@ for (const filename of publicFiles) {
   if (!fs.existsSync(source)) {
     throw new Error(`Arquivo necessário para publicação não encontrado: ${filename}`)
   }
+  fs.mkdirSync(path.dirname(destination), { recursive: true })
   fs.copyFileSync(source, destination)
 }
 

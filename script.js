@@ -2032,3 +2032,9 @@ async function init() {
 }
 
 init()
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('PWA indisponível:', err))
+  })
+}
