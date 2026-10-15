@@ -55,4 +55,15 @@ Use uma extensão de servidor estático, como Live Server no VS Code, e abra `in
 
 ## Publicar
 
-O projeto pode ser publicado no Firebase Hosting ou em qualquer hospedagem estática. Publique `index.html`, `styles.css`, `script.js` e `firebase.js` mantendo os arquivos no mesmo diretório.
+Instale e autentique o Firebase CLI, gere a pasta permitida para publicação e publique apenas o Hosting:
+
+```sh
+npm install -g firebase-tools
+firebase login
+npm run build:hosting
+firebase deploy --only hosting
+```
+
+Depois do deploy, abra a URL HTTPS do Firebase Hosting no próprio celular, entre com o administrador da escola e escolha **Empréstimos > Escanear QR code > Câmera deste aparelho**. O navegador usará a câmera traseira, sem cabo, pareamento ou transmissão de vídeo ao computador. Aceite a permissão de câmera quando o navegador pedir. A URL HTTPS é necessária para liberar a câmera; `http://localhost` funciona no computador, mas não substitui a URL HTTPS no celular.
+
+O build de Hosting copia somente `index.html`, `styles.css`, `script.js`, `firebase.js` e o favicon para `dist/`, sem publicar scripts de migração, chaves de serviço ou arquivos de desenvolvimento.

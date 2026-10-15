@@ -1602,7 +1602,7 @@ function selectQrInputMode(mode) {
 async function startQrCamera() {
   const status = $('#qrScannerStatus')
   if (!navigator.mediaDevices?.getUserMedia) {
-    const message = 'Este navegador não oferece acesso seguro à câmera. Escolha um leitor externo.'
+    const message = 'Para usar a câmera do celular, abra o Libris pelo endereço HTTPS publicado. Acesso local por HTTP pode bloquear a câmera.'
     if (status) status.textContent = message
     return toast(message, 'error')
   }
@@ -1741,7 +1741,6 @@ function setup() {
 
   $$('.modal [data-close]').forEach((b) => b.onclick = () => {
     if (b.dataset.close === 'loginModal' && state.profile?.role !== 'admin') return
-    if (b.dataset.close === 'settingsModal' && !config.schoolName.trim()) return
     if (b.dataset.close === 'qrScannerModal') stopQrScanner()
     modal(b.dataset.close, false)
   })
@@ -1769,8 +1768,6 @@ async function saveSchoolSettings(event) {
   event.preventDefault()
   if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
 
-  const schoolName = $('#schoolNameInput')?.value.trim() || ''
-  if (!schoolName) return toast('Informe o nome da escola.', 'error')
   const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
   const reminderDays = Number($('#reminderDaysInput')?.value || 1)
   const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
@@ -1782,7 +1779,6 @@ async function saveSchoolSettings(event) {
   try {
     const schoolRef = doc(db, 'schools', config.currentSchoolId)
     await setDoc(schoolRef, {
-      name: schoolName,
       coordinationEmail,
       reminderDays,
       coordinationDays,
@@ -1792,16 +1788,14 @@ async function saveSchoolSettings(event) {
       updatedAt: serverTimestamp()
     }, { merge: true })
 
-  config.schoolName = schoolName
     config.coordinationEmail = coordinationEmail
     config.reminderDays = reminderDays
     config.coordinationDays = coordinationDays
     config.maxBooksStudent = maxBooksStudent
     config.maxBooksTeacher = maxBooksTeacher
     config.teacherLoanDays = teacherLoanDays
-    if ($('#schoolName')) $('#schoolName').textContent = schoolName
     syncSchoolSettingsForm(config)
-    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
     modal('settingsModal', false)
     toast('Configurações salvas com sucesso.')
   } catch (err) {
@@ -1810,7 +1804,6 @@ async function saveSchoolSettings(event) {
 }
 
 function syncSchoolSettingsForm(data = config) {
-  const schoolNameInput = $('#schoolNameInput')
   const coordinationEmailInput = $('#coordinationEmailInput')
   const reminderDaysInput = $('#reminderDaysInput')
   const coordinationDaysInput = $('#coordinationDaysInput')
@@ -1819,7 +1812,6 @@ function syncSchoolSettingsForm(data = config) {
   const teacherLoanDaysInput = $('#teacherLoanDaysInput')
   const settings = data || {}
 
-  if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
   if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
   if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
   if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
@@ -1837,7 +1829,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
     const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
     if (school.exists()) {
       const data = school.data()
-      config.schoolName = String(data.name || '').trim()
+      if (data.name) config.schoolName = data.name
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
@@ -1992,12 +1984,6 @@ async function init() {
     if (settingsButton) settingsButton.hidden = false
     if (logoutButton) logoutButton.hidden = false
     modal('loginModal', false)
-    if (!config.schoolName) {
-      syncSchoolSettingsForm()
-      modal('settingsModal', true)
-      $('#schoolNameInput')?.focus()
-      toast('Configure os dados da escola para iniciar o painel.')
-    }
   })
 }
 
