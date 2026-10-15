@@ -6,19 +6,21 @@ service cloud.firestore {
     }
 
     function currentUserDoc() {
-      return signedIn() ? get(/databases/$(database)/documents/users/$(request.auth.uid)) : null;
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
     function isAdmin() {
-      return signedIn() && currentUserDoc() != null && currentUserDoc().data.role == 'admin';
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && currentUserDoc().data.role == 'admin'
+        && currentUserDoc().data.schoolId is string
+        && currentUserDoc().data.schoolId.size() > 0;
     }
 
     function sameSchool(schoolId) {
-      return signedIn() && currentUserDoc() != null && (
-        currentUserDoc().data.schoolId == schoolId ||
-        !('schoolId' in currentUserDoc().data) ||
-        schoolId == 'escola-padrao'
-      );
+      return isAdmin()
+        && schoolId is string
+        && schoolId == currentUserDoc().data.schoolId;
     }
 
     function validBookStock() {
@@ -35,75 +37,72 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId} {
-      allow read: if true;
-      allow create, update: if signedIn() && isAdmin() && sameSchool(schoolId);
+      allow read, create, update: if sameSchool(schoolId);
       allow delete: if false;
     }
 
     match /users/{userId} {
-      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
-      allow create: if signedIn() && request.auth.uid == userId;
-      allow update: if signedIn() && request.auth.uid == userId;
+      allow read: if (signedIn() && request.auth.uid == userId)
+        || (isAdmin() && sameSchool(resource.data.schoolId));
       allow delete: if false;
     }
 
     match /books/{bookId} {
-      allow read: if true;
-      allow create: if signedIn() && isAdmin()
-        && request.resource.data.schoolId == currentUserDoc().data.schoolId
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId)
         && validBookStock();
-      allow update: if signedIn() && isAdmin()
-        && resource.data.schoolId == currentUserDoc().data.schoolId
+      allow update: if sameSchool(resource.data.schoolId)
         && request.resource.data.schoolId == resource.data.schoolId
         && validBookStock();
-      allow delete: if signedIn() && isAdmin() && resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow delete: if sameSchool(resource.data.schoolId);
     }
 
     match /counters/{counterId} {
-      allow read, write: if signedIn() && isAdmin();
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId);
+      allow update: if sameSchool(resource.data.schoolId)
+        && request.resource.data.schoolId == resource.data.schoolId;
+      allow delete: if sameSchool(resource.data.schoolId);
     }
 
     match /categories/{categoryId} {
-      allow read: if true;
-      allow create, update: if signedIn() && isAdmin()
-        && request.resource.data.schoolId == currentUserDoc().data.schoolId;
-      allow delete: if signedIn() && isAdmin() && resource.data.schoolId == currentUserDoc().data.schoolId;
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId);
+      allow update: if sameSchool(resource.data.schoolId)
+        && request.resource.data.schoolId == resource.data.schoolId;
+      allow delete: if sameSchool(resource.data.schoolId);
     }
 
     match /readers/{readerId} {
-      allow read: if signedIn() && (isAdmin() || request.auth.uid == resource.data.guardianUid);
-      allow create, update, delete: if signedIn() && isAdmin();
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId);
+      allow update: if sameSchool(resource.data.schoolId)
+        && request.resource.data.schoolId == resource.data.schoolId;
+      allow delete: if sameSchool(resource.data.schoolId);
     }
 
     match /reservations/{reservationId} {
-      allow read: if signedIn() && (
-        request.auth.uid == resource.data.guardianUid ||
-        isAdmin() ||
-        request.auth.uid == resource.data.readerId
-      );
-      allow create: if signedIn() && (
-        request.resource.data.guardianUid == request.auth.uid || isAdmin()
-      ) && request.resource.data.status in ['pending', 'fulfilled', 'cancelled'];
-      allow update: if signedIn() && (
-        request.auth.uid == resource.data.guardianUid || isAdmin()
-      ) && request.resource.data.guardianUid == resource.data.guardianUid;
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId)
+        && request.resource.data.status in ['pending', 'fulfilled', 'cancelled'];
+      allow update: if sameSchool(resource.data.schoolId)
+        && request.resource.data.schoolId == resource.data.schoolId
+        && request.resource.data.status in ['pending', 'fulfilled', 'cancelled'];
       allow delete: if false;
     }
 
     match /loans/{loanId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && isAdmin()
-        && request.resource.data.schoolId == currentUserDoc().data.schoolId
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId)
         && (!('notices' in request.resource.data) || request.resource.data.notices is map);
-      allow update: if signedIn() && isAdmin()
-        && resource.data.schoolId == currentUserDoc().data.schoolId
+      allow update: if sameSchool(resource.data.schoolId)
         && request.resource.data.schoolId == resource.data.schoolId;
       allow delete: if false;
     }
 
     match /audit_logs/{logId} {
-      allow read: if signedIn() && isAdmin();
-      allow create: if signedIn() && isAdmin();
+      allow read: if sameSchool(resource.data.schoolId);
+      allow create: if sameSchool(request.resource.data.schoolId);
       allow update, delete: if false;
     }
   }

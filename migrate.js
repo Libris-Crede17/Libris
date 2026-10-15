@@ -17,7 +17,7 @@ function parseCsv(text) {
   })
 }
 
-function normalizeRecord(record = {}, collectionName) {
+function normalizeRecord(record = {}, collectionName, schoolId) {
   const payload = { ...record }
 
   if (collectionName === 'books') {
@@ -28,6 +28,7 @@ function normalizeRecord(record = {}, collectionName) {
       title: String(payload.title ?? payload.titulo ?? '').trim(),
       author: String(payload.author ?? payload.autor ?? '').trim(),
       categoryId: String(payload.categoryId ?? payload.categoria ?? '').trim(),
+      schoolId,
       total: Number.isFinite(total) ? total : 0,
       available: Number.isFinite(available) ? Math.max(0, Math.min(available, total)) : 0,
       createdAt: payload.createdAt || admin.firestore.FieldValue.serverTimestamp()
@@ -37,6 +38,7 @@ function normalizeRecord(record = {}, collectionName) {
   if (collectionName === 'readers') {
     return {
       name: String(payload.name ?? payload.nome ?? '').trim(),
+      schoolId,
       class: String(payload.class ?? payload.turma ?? '').trim(),
       role: ['student', 'guardian', 'teacher'].includes(String(payload.role ?? '').toLowerCase()) ? String(payload.role).toLowerCase() : 'student',
       guardianUid: payload.guardianUid || null,
@@ -49,6 +51,7 @@ function normalizeRecord(record = {}, collectionName) {
     return {
       readerId: String(payload.readerId ?? '').trim(),
       bookId: String(payload.bookId ?? '').trim(),
+      schoolId,
       borrowedAt: payload.borrowedAt ? new Date(payload.borrowedAt) : admin.firestore.Timestamp.now(),
       dueAt: payload.dueAt ? new Date(payload.dueAt) : admin.firestore.Timestamp.now(),
       status: ['active', 'returned'].includes(String(payload.status ?? '')) ? String(payload.status) : 'active',
@@ -64,13 +67,14 @@ function normalizeRecord(record = {}, collectionName) {
     return {
       readerId: String(payload.readerId ?? '').trim(),
       bookId: String(payload.bookId ?? '').trim(),
+      schoolId,
       guardianUid: String(payload.guardianUid ?? '').trim() || null,
       status: ['pending', 'fulfilled', 'cancelled'].includes(String(payload.status ?? '')) ? String(payload.status) : 'pending',
       createdAt: payload.createdAt ? new Date(payload.createdAt) : admin.firestore.Timestamp.now()
     }
   }
 
-  return payload
+  return { ...payload, schoolId }
 }
 
 function readLegacyData() {
@@ -90,10 +94,10 @@ function readLegacyData() {
   throw new Error('Arquivo local de migração não encontrado. Crie dados_antigos.json ou dados_antigos.csv na raiz do projeto.')
 }
 
-async function migrateCollection(collectionName, rows) {
+async function migrateCollection(collectionName, rows, schoolId) {
   const db = admin.firestore()
   const documents = rows
-    .map((row) => normalizeRecord(row, collectionName))
+    .map((row) => normalizeRecord(row, collectionName, schoolId))
     .filter((record) => Object.keys(record).length > 0)
 
   if (!documents.length) {
@@ -110,6 +114,7 @@ async function migrateCollection(collectionName, rows) {
       batch.set(ref, { ...record, migratedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
       if (itemIndex === slice.length - 1) {
         batch.set(db.collection('audit_logs').doc(), {
+          schoolId,
           action: 'migration_batch',
           details: { collectionName, total: slice.length },
           timestamp: admin.firestore.FieldValue.serverTimestamp()
@@ -126,6 +131,11 @@ async function migrateCollection(collectionName, rows) {
 
 async function main() {
   try {
+    const schoolId = String(process.env.SCHOOL_ID || '').trim()
+    if (!schoolId) {
+      throw new Error('Defina SCHOOL_ID com o ID da escola antes de iniciar a migração.')
+    }
+
     if (!admin.apps.length) {
       admin.initializeApp({
         projectId: process.env.FIREBASE_PROJECT_ID || 'librisce'
@@ -155,7 +165,7 @@ async function main() {
     })
 
     for (const collectionName of collections) {
-      totals[collectionName] = await migrateCollection(collectionName, grouped[collectionName])
+      totals[collectionName] = await migrateCollection(collectionName, grouped[collectionName], schoolId)
     }
 
     console.log('Migração concluída.', totals)

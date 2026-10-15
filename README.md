@@ -4,11 +4,10 @@ Sistema escolar de biblioteca da CREDE, feito com HTML, CSS, JavaScript puro, Fi
 
 ## Configuração Firebase
 
-1. No Firebase Console do projeto `libris-biblioteca`, ative **Authentication > Email/Password**.
-2. Crie um usuário administrativo em Authentication.
-3. Crie o banco Cloud Firestore.
-4. Publique o conteúdo de `firestore.rules` nas regras do Firestore.
-5. Crie o documento `schools/escola-padrao` com, pelo menos:
+1. No Firebase Console do projeto `librisce`, ative **Authentication > Email/Password**.
+2. Crie o usuário administrativo em Authentication e anote o UID.
+3. Crie manualmente `users/{UID}` no Firestore. O perfil deve conter `role: "admin"` e o `schoolId` correto; o cliente não pode criar ou alterar perfis.
+4. Crie o documento `schools/escola-padrao` com, pelo menos:
 
 ```json
 {
@@ -18,7 +17,20 @@ Sistema escolar de biblioteca da CREDE, feito com HTML, CSS, JavaScript puro, Fi
 }
 ```
 
-6. Se a escola usar outro identificador, altere `currentSchoolId` no início de `script.js`.
+5. Publique o conteúdo de `firestore.rules` nas regras do Firestore.
+6. Se a escola usar outro identificador, configure o mesmo `schoolId` no perfil do administrador e em `script.js`.
+
+Em uma base já existente, faça backup e confira que todos os documentos administrativos tenham o `schoolId` correto antes de publicar as regras. Documentos sem esse campo serão negados; faça o backfill por escola usando o Admin SDK e valide os dados antes do deploy.
+
+## Migração de dados legados
+
+Execute a migração com credenciais do Firebase Admin SDK e informe explicitamente a escola de destino:
+
+```sh
+SCHOOL_ID=escola-padrao node migrate.js
+```
+
+Todos os documentos migrados e registros de auditoria recebem esse `schoolId`; a migração falha se a variável não estiver definida.
 
 ## Capas, sinopses e avisos por e-mail
 

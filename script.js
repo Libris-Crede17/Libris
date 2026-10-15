@@ -24,9 +24,6 @@ const config = {
 
 const defaultCategories = []
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
-const fallbackBooks = []
-const fallbackReaders = []
-const fallbackLoans = []
 const canUseFirebase = Boolean(firebaseReady && auth && db)
 
 const state = {
@@ -39,11 +36,13 @@ const state = {
   categories: [...defaultCategories],
   acervoQuery: '',
   readerQuery: '',
+  loanQuery: '',
   adminUnsubs: [],
   loanFilter: 'all'
 }
 
 let pendingCsvImport = null
+const selectedLabelBookIds = new Set()
 
 /* -------------------------
    DOM helpers & utilities (blindados)
@@ -127,7 +126,7 @@ function renderCategorySelect() {
 function renderCategoryList() {
   const list = $('#categoryList')
   if (!list) return
-  list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${c.id}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
+  list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${esc(c.docId || c.id)}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
   $$('[data-del-category]').forEach((b) => b.onclick = () => removeCategory(b.dataset.delCategory))
 }
 
@@ -142,14 +141,52 @@ function renderBooks() {
 }
 
 function renderReaderSelector() {
-  const select = $('#readerSelectInput')
-  if (!select) return
-  const options = ['<option value="">Selecione um leitor</option>']
-  state.readers.forEach((reader) => {
-    const labelText = `${reader.name} · ${reader.type}${reader.type === 'Aluno' && reader.matricula ? ` · ${reader.matricula}` : ''}`
-    options.push(`<option value="${reader.id}">${esc(labelText)}</option>`)
-  })
-  select.innerHTML = options.join('')
+  const input = $('#readerInput')
+  const suggestions = $('#readerSuggestions')
+  if (!input || !suggestions) return
+
+  const queryText = input.value.trim().toLocaleLowerCase('pt-BR')
+  if (!queryText || $('#loanReaderIdInput')?.value) {
+    suggestions.replaceChildren()
+    suggestions.hidden = true
+    input.setAttribute('aria-expanded', 'false')
+    return
+  }
+
+  const matches = state.readers.filter((reader) => [
+    reader.name,
+    reader.matricula,
+    reader.email,
+    reader.phone,
+    reader.course,
+    reader.class,
+    reader.type
+  ].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText))).slice(0, 8)
+
+  suggestions.innerHTML = matches.length ? matches.map((reader) => `
+    <button class="reader-suggestion" type="button" role="option" data-select-loan-reader="${esc(reader.id)}">
+      <span class="reader-suggestion-main">${esc(reader.name || 'Leitor sem nome')}</span>
+      <span class="reader-suggestion-meta">${esc(reader.matricula || reader.type || reader.role || 'Leitor')} · ${esc(reader.course || reader.class || reader.email || '')}</span>
+    </button>
+  `).join('') : '<p class="reader-suggestions-empty">Nenhum leitor encontrado nesta escola.</p>'
+  suggestions.hidden = false
+  input.setAttribute('aria-expanded', 'true')
+}
+
+function selectLoanReader(readerId) {
+  const reader = state.readers.find((item) => item.id === readerId)
+  const input = $('#readerInput')
+  const selectedId = $('#loanReaderIdInput')
+  const suggestions = $('#readerSuggestions')
+  if (!reader || !input || !selectedId) return
+
+  input.value = `${reader.name || ''}${reader.matricula ? ` · ${reader.matricula}` : ''}`
+  selectedId.value = reader.id
+  if (suggestions) {
+    suggestions.replaceChildren()
+    suggestions.hidden = true
+  }
+  input.setAttribute('aria-expanded', 'false')
 }
 
 function renderReaders() { 
@@ -200,6 +237,7 @@ function renderDashboard() {
           $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === targetTab))
           $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === targetTab))
           renderLoans()
+          $('.admin-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
       }
     })
@@ -223,6 +261,14 @@ function normalizeBookCode(value) {
   return String(value ?? '').replace(/\D+/g, '').slice(0, 4).padStart(4, '0')
 }
 
+function getLastBookSequence(prefix) {
+  return state.books.reduce((lastCode, book) => {
+    const [bookPrefix, sequence] = String(book.code || '').split('-')
+    const numericSequence = Number(sequence)
+    return bookPrefix === prefix && Number.isInteger(numericSequence) ? Math.max(lastCode, numericSequence) : lastCode
+  }, 0)
+}
+
 function getLoanLimitForReader(reader = {}) {
   const role = String(reader.role || reader.type || 'student').toLowerCase()
   return role === 'teacher' ? Number(config.maxBooksTeacher || 35) : Number(config.maxBooksStudent || 2)
@@ -233,6 +279,7 @@ async function logAudit(action, details = {}, actorUid = null) {
   try {
     await addDoc(collection(db, 'audit_logs'), {
       actorUid: actorUid || state.user?.uid || null,
+      schoolId: config.currentSchoolId,
       action,
       details: details || {},
       timestamp: serverTimestamp()
@@ -284,15 +331,16 @@ async function addBook(event) {
 
     const prefix = String(categoryId || 'GE').trim().toUpperCase()
     const categoryName = selectedCategory?.name || prefix
-    const counterRef = doc(db, 'counters', `books_${prefix}`)
+    const counterRef = doc(db, 'counters', `${encodeURIComponent(config.currentSchoolId)}_books_${prefix}`)
     await runTransaction(db, async (tx) => {
       const counterSnap = await tx.get(counterRef)
-      const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
+      const lastCode = Math.max(Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0), getLastBookSequence(prefix))
       const nextCodeNumber = lastCode + 1
       const numberCode = normalizeBookCode(nextCodeNumber)
       const code = `${prefix}-${numberCode}`
       tx.set(counterRef, {
         prefix,
+        schoolId: config.currentSchoolId,
         lastCode: nextCodeNumber,
         updatedAt: serverTimestamp()
       }, { merge: true })
@@ -329,7 +377,7 @@ async function addCategory(event) {
   if (getCategoryOptions().some((category) => category.name.toLowerCase() === name.toLowerCase() || category.code?.toLowerCase() === normalizedCode.toLowerCase())) return toast('Essa categoria já existe.', 'error')
   loading(button, true, 'Salvando…')
   try {
-    const categoryRef = doc(db, 'categories', normalizedCode)
+    const categoryRef = doc(db, 'categories', `${encodeURIComponent(config.currentSchoolId)}__${normalizedCode}`)
     await setDoc(categoryRef, { id: normalizedCode, name, code: normalizedCode, schoolId: config.currentSchoolId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })
     if ($('#categoryForm')) $('#categoryForm').reset(); 
     renderCategorySelect(); 
@@ -401,10 +449,10 @@ async function registerLoan() {
   const button = $('#registerLoanBtn')
   const code = $('#bookCodeInput')?.value.trim().toUpperCase()
   const text = $('#readerInput')?.value.trim()
-  const selectedReaderId = $('#readerSelectInput')?.value
+  const selectedReaderId = $('#loanReaderIdInput')?.value
   const days = Number($('#loanDays')?.value || 7)
   const book = state.books.find((b) => b.code?.toUpperCase() === code)
-  const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text?.toLowerCase())
+  const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLocaleLowerCase('pt-BR') === text?.toLocaleLowerCase('pt-BR'))
 
   if (!book || !reader) {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
@@ -474,7 +522,8 @@ async function registerLoan() {
     await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
     if ($('#bookCodeInput')) $('#bookCodeInput').value = ''
     if ($('#readerInput')) $('#readerInput').value = ''
-    if ($('#readerSelectInput')) $('#readerSelectInput').value = ''
+    if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
+    if ($('#readerSuggestions')) $('#readerSuggestions').hidden = true
     toast('Empréstimo registrado.')
   } catch (err) {
     if (err.message === 'indisponível') {
@@ -646,23 +695,154 @@ async function triggerNotification(type) {
 /* -------------------------
    CSV import / export
    ------------------------- */
-const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
+const bookExportFields = [
+  ['ID do documento', 'documentId'],
+  ['Código', 'code'],
+  ['Título', 'title'],
+  ['Autor', 'author'],
+  ['Editora', 'publisher'],
+  ['ID da categoria', 'categoryId'],
+  ['Categoria', 'categoryName'],
+  ['Ano', 'year'],
+  ['Localização', 'shelf'],
+  ['Disponíveis', 'available'],
+  ['Total', 'total'],
+  ['Tombamento', 'tombamento'],
+  ['Status', 'status'],
+  ['ID da escola', 'schoolId'],
+  ['Nome da escola', 'schoolName'],
+  ['Criado em', 'createdAt'],
+  ['Atualizado em', 'updatedAt']
+]
 
-function exportCsv() { const rows = bookExportRows(); const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
-function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
+function exportValue(value) {
+  if (value?.toDate) return value.toDate().toISOString()
+  if (value instanceof Date) return value.toISOString()
+  if (value && typeof value === 'object') return JSON.stringify(value, (_, nested) => nested?.toDate ? nested.toDate().toISOString() : nested)
+  return value ?? ''
+}
+
+const bookExportRows = () => [
+  bookExportFields.map(([header]) => header),
+  ...state.books.map((book) => bookExportFields.map(([, field]) => {
+    if (field === 'documentId') return book.id || ''
+    if (field === 'categoryName') return book.categoryName || label(book.categoryId)
+    if (field === 'status') return bookStatus(book)
+    if (field === 'schoolName') return config.schoolName
+    if (field === 'synopsis' || field === 'coverUrl') return ''
+    return exportValue(book[field])
+  }))
+]
+
+function recordsToExportRows(records = [], excludedFields = []) {
+  const excluded = new Set(excludedFields)
+  const fields = [...new Set(records.flatMap((record) => Object.keys(record)))].filter((field) => !excluded.has(field)).sort()
+  return [fields, ...records.map((record) => fields.map((field) => exportValue(record[field])))]
+}
+
+async function schoolBackupTables() {
+  if (!state.profile || state.profile.role !== 'admin' || !config.currentSchoolId) throw new Error('Acesse com um administrador vinculado a uma escola.')
+
+  const collectionNames = ['reservations', 'counters', 'audit_logs', 'users']
+  const [schoolSnapshot, ...snapshots] = await Promise.all([
+    getDoc(doc(db, 'schools', config.currentSchoolId)),
+    ...collectionNames.map((name) => getDocs(query(collection(db, name), where('schoolId', '==', config.currentSchoolId))))
+  ])
+  const schoolData = schoolSnapshot.exists() ? schoolSnapshot.data() : {}
+  const collectionRecords = Object.fromEntries(collectionNames.map((name, index) => [
+    name,
+    snapshots[index].docs.map((item) => ({ id: item.id, ...item.data() }))
+  ]))
+
+  return [
+    ['Acervo', bookExportRows()],
+    ['Emprestimos', recordsToExportRows(state.loans)],
+    ['Leitores', recordsToExportRows(state.readers)],
+    ['Categorias', recordsToExportRows(state.categories)],
+    ['Reservas', recordsToExportRows(collectionRecords.reservations)],
+    ['Contadores', recordsToExportRows(collectionRecords.counters)],
+    ['Auditoria', recordsToExportRows(collectionRecords.audit_logs)],
+    ['Usuarios', recordsToExportRows(collectionRecords.users)],
+    ['Escola', recordsToExportRows([{ id: config.currentSchoolId, ...schoolData, schoolId: config.currentSchoolId }])]
+  ]
+}
+
+function csvFromRows(rows) {
+  return rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n')
+}
+
+function backupFileBaseName() {
+  const schoolId = String(config.currentSchoolId || 'escola').replace(/[^a-z0-9_-]/gi, '_')
+  return `libris-backup-${schoolId}-${new Date().toISOString().slice(0, 10)}`
+}
+
+function downloadBlob(blob, filename) {
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+  link.href = url
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+async function exportCsv() {
+  const button = $('#exportCsvOption')
+  loading(button, true, 'Preparando backup…')
+  try {
+    const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')
+    const tables = await schoolBackupTables()
+    const zip = new JSZip()
+    tables.forEach(([name, rows]) => zip.file(`${name.toLocaleLowerCase('pt-BR')}.csv`, `\ufeff${csvFromRows(rows)}`))
+    zip.file('LEIA-ME.txt', `Backup escolar Libris\nEscola: ${config.schoolName}\nID: ${config.currentSchoolId}\nGerado em: ${new Date().toISOString()}\n\nCada arquivo CSV corresponde a uma coleção da escola. Empréstimos inclui registros ativos e devolvidos; auditoria registra eventos disponíveis no sistema.`)
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+    downloadBlob(blob, `${backupFileBaseName()}.zip`)
+    modal('exportModal', false)
+  } catch (err) {
+    console.error('Falha ao exportar backup CSV:', err)
+    error(err, 'Não foi possível gerar o backup CSV da escola.')
+  } finally {
+    loading(button, false)
+  }
+}
+
+async function exportXlsx() {
+  const button = $('#exportXlsxOption')
+  loading(button, true, 'Preparando backup…')
+  try {
+    const tables = await schoolBackupTables()
+    const workbook = XLSX.utils.book_new()
+    tables.forEach(([name, rows]) => XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), name))
+    XLSX.writeFile(workbook, `${backupFileBaseName()}.xlsx`)
+    modal('exportModal', false)
+  } catch (err) {
+    console.error('Falha ao exportar backup XLSX:', err)
+    error(err, 'Não foi possível gerar o backup XLSX da escola.')
+  } finally {
+    loading(button, false)
+  }
+}
 
 const normalizeCsvHeader = (value) => String(value ?? '').replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 const csvHeaderAliases = {
+  documentId: ['id do documento', 'document id', 'documentid', 'firestore id'],
   codigo: ['codigo', 'codigo do livro', 'codigo do acervo', 'id', 'id do livro', 'cod'],
   titulo: ['titulo', 'titulo do livro', 'nome do livro', 'livro'],
   autor: ['autor', 'nome do autor'],
   editora: ['editora', 'publisher'],
-  categoria: ['categoria', 'genero', 'assunto'],
+  categoriaId: ['id da categoria', 'categoria id', 'category id', 'categoryid'],
+  categoriaNome: ['nome da categoria', 'category name', 'categoryname'],
+  categoria: ['categoria', 'genero', 'assunto', 'category'],
   ano: ['ano', 'ano de publicacao', 'ano publicacao'],
   localizacao: ['localizacao', 'estante', 'prateleira', 'local'],
   disponiveis: ['disponiveis', 'quantidade disponivel', 'exemplares disponiveis'],
   total: ['total', 'quantidade', 'quantidade total', 'quantidade de exemplares', 'exemplares'],
-  tombamento: ['tombamento', 'numero de tombamento', 'patrimonio']
+  tombamento: ['tombamento', 'numero de tombamento', 'patrimonio'],
+  sinopse: ['sinopse', 'synopsis'],
+  capa: ['url da capa', 'capa url', 'cover url', 'coverurl'],
+  schoolId: ['id da escola', 'school id', 'schoolid'],
+  schoolName: ['nome da escola', 'school name', 'schoolname'],
+  criadoEm: ['criado em', 'created at', 'createdat'],
+  atualizadoEm: ['atualizado em', 'updated at', 'updatedat']
 }
 
 function mapCsvColumns(headers) {
@@ -676,6 +856,7 @@ function mapCsvColumns(headers) {
 }
 
 function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) ? number : null }
+function parseCsvDate(value) { const text = String(value ?? '').trim(); if (!text) return null; const parsed = new Date(text); return Number.isNaN(parsed.getTime()) ? null : parsed }
 
 async function importCsv(event) {
   const input = event.target
@@ -701,7 +882,7 @@ async function importCsv(event) {
     }
 
     const columns = mapCsvColumns(rows[headerRowIndex])
-    const required = ['codigo', 'titulo', 'autor', 'categoria', 'total']
+    const required = ['codigo', 'titulo', 'autor', 'total']
     const missing = required.filter((header) => columns[header] === undefined)
     if (missing.length) {
       const detected = rows[headerRowIndex].filter(Boolean).join(', ')
@@ -715,6 +896,7 @@ async function importCsv(event) {
       categoriesByName.set(normalizeCsvHeader(category.code || category.id), category)
     })
     const existingCodes = new Set(state.books.map((book) => String(book.code || '').trim().toUpperCase()))
+    const existingDocumentIds = new Set(state.books.map((book) => book.id).filter(Boolean))
     const seenCodes = new Set()
     const booksToImport = []
     const countersToUpdate = new Map()
@@ -726,25 +908,37 @@ async function importCsv(event) {
       if (!row.some((value) => String(value ?? '').trim())) return
       const line = headerRowIndex + index + 2
       const code = valueAt(row, 'codigo').toUpperCase()
+      const sourceDocumentId = valueAt(row, 'documentId')
       const codeParts = code.match(/^([A-Z0-9]{1,4})-(\d{4})$/)
       const title = valueAt(row, 'titulo')
       const author = valueAt(row, 'autor')
-      const categoryName = valueAt(row, 'categoria')
-      const category = categoriesByName.get(normalizeCsvHeader(categoryName))
+      const categoryName = valueAt(row, 'categoria') || valueAt(row, 'categoriaNome')
+      const categoryId = valueAt(row, 'categoriaId')
+      const category = categoriesByName.get(normalizeCsvHeader(categoryName)) || categoriesByName.get(normalizeCsvHeader(categoryId))
       const total = parseCsvInteger(valueAt(row, 'total'))
       const availableValue = valueAt(row, 'disponiveis')
       const available = availableValue ? parseCsvInteger(availableValue) : total
       const yearValue = valueAt(row, 'ano')
       const year = yearValue ? parseCsvInteger(yearValue) : 0
+      const sourceSchoolId = valueAt(row, 'schoolId')
+      const createdAtValue = valueAt(row, 'criadoEm')
+      const updatedAtValue = valueAt(row, 'atualizadoEm')
+      const createdAt = parseCsvDate(createdAtValue)
+      const updatedAt = parseCsvDate(updatedAtValue)
 
       const rowErrors = []
       if (!codeParts) rowErrors.push('código deve seguir PREFIXO-0001')
       if (!title) rowErrors.push('título ausente')
       if (!author) rowErrors.push('autor ausente')
-      if (!category) rowErrors.push(`categoria não cadastrada: ${categoryName || 'vazia'}`)
+      if (!categoryName && !categoryId) rowErrors.push('categoria ausente')
+      else if (!category) rowErrors.push(`categoria não cadastrada: ${categoryName || categoryId}`)
       if (total === null || total < 1) rowErrors.push('total inválido')
       if (available === null || available > total) rowErrors.push('disponíveis deve estar entre 0 e o total')
       if (year === null) rowErrors.push('ano inválido')
+      if (sourceSchoolId && sourceSchoolId !== config.currentSchoolId) rowErrors.push(`arquivo pertence à escola ${sourceSchoolId}`)
+      if (createdAtValue && !createdAt) rowErrors.push('data de criação inválida')
+      if (updatedAtValue && !updatedAt) rowErrors.push('data de atualização inválida')
+      if (sourceDocumentId && (sourceDocumentId.includes('/') || sourceDocumentId.length > 1500)) rowErrors.push('ID do documento inválido')
       if (codeParts && category && codeParts[1] !== String(category.code || category.id).toUpperCase()) rowErrors.push('prefixo do código não corresponde à categoria')
       if (rowErrors.length) {
         errors.push(`linha ${line} (${rowErrors.join(', ')})`)
@@ -760,19 +954,27 @@ async function importCsv(event) {
         return
       }
 
+      const documentId = sourceDocumentId && !existingDocumentIds.has(sourceDocumentId) ? sourceDocumentId : ''
+      if (documentId) existingDocumentIds.add(documentId)
+
       booksToImport.push({
+        documentId,
         code,
         title,
         author,
         publisher: valueAt(row, 'editora'),
         categoryId: String(category.code || category.id),
-        categoryName: category.name,
+        categoryName: categoryName || category.name,
         year,
         shelf: valueAt(row, 'localizacao'),
         available,
         total,
         tombamento: valueAt(row, 'tombamento'),
+        synopsis: valueAt(row, 'sinopse'),
+        coverUrl: valueAt(row, 'capa'),
         status: available > 0 ? 'disponivel' : 'emprestado',
+        createdAt: createdAt ? Timestamp.fromDate(createdAt) : null,
+        updatedAt: updatedAt ? Timestamp.fromDate(updatedAt) : null,
         schoolId: config.currentSchoolId
       })
       const [prefix, codeNumber] = [codeParts[1], Number(codeParts[2])]
@@ -799,18 +1001,20 @@ async function confirmCsvImport() {
 
   try {
     for (const [prefix, importedLastCode] of pending.counters) {
-      const counterRef = doc(db, 'counters', `books_${prefix}`)
+      const counterRef = doc(db, 'counters', `${encodeURIComponent(config.currentSchoolId)}_books_${prefix}`)
       await runTransaction(db, async (transaction) => {
         const counter = await transaction.get(counterRef)
         const lastCode = Number(counter.exists() ? counter.data().lastCode || 0 : 0)
-        if (importedLastCode > lastCode) transaction.set(counterRef, { prefix, lastCode: importedLastCode, updatedAt: serverTimestamp() }, { merge: true })
+        if (importedLastCode > lastCode) transaction.set(counterRef, { prefix, schoolId: config.currentSchoolId, lastCode: importedLastCode, updatedAt: serverTimestamp() }, { merge: true })
       })
     }
 
     for (let offset = 0; offset < pending.books.length; offset += 450) {
       const batch = writeBatch(db)
       pending.books.slice(offset, offset + 450).forEach((book) => {
-        batch.set(doc(collection(db, 'books')), { ...book, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+        const { documentId, ...bookData } = book
+        const bookRef = documentId ? doc(db, 'books', documentId) : doc(collection(db, 'books'))
+        batch.set(bookRef, { ...bookData, createdAt: bookData.createdAt || serverTimestamp(), updatedAt: bookData.updatedAt || serverTimestamp() })
       })
       await batch.commit()
     }
@@ -831,39 +1035,322 @@ async function confirmCsvImport() {
    ------------------------- */
 function clearAdminSubscriptions() { while (state.adminUnsubs.length) try { state.adminUnsubs.pop()() } catch (e) { console.warn('erro ao limpar subscription:', e) } }
 
-function subscribeAdmin() {
+function resetAdminState() {
+  clearAdminSubscriptions()
+  selectedLabelBookIds.clear()
+  state.user = null
+  state.profile = null
+  state.readers = []
+  state.loans = []
+  state.books = []
+  state.categories = []
+  if ($('#adminView')) $('#adminView').hidden = true
+  if ($('#openSettingsBtn')) $('#openSettingsBtn').hidden = true
+  if ($('#logoutBtn')) $('#logoutBtn').hidden = true
+  renderReaders()
+  renderLoans()
+  renderBooks()
+  renderCategoryList()
+  renderDashboard()
+}
+
+  function selectedLabelBooks() {
+    return state.books.filter((book) => selectedLabelBookIds.has(book.id))
+  }
+
+  function labelQrPayload(book) {
+    return JSON.stringify({ version: 1, schoolId: config.currentSchoolId, bookId: book.id, code: book.code })
+  }
+
+  function drawWrappedLabelText(context, text, x, y, maxWidth, lineHeight, maxLines) {
+    const words = String(text || '').split(/\s+/).filter(Boolean)
+    const lines = []
+    let line = ''
+
+    words.forEach((word) => {
+      const candidate = line ? `${line} ${word}` : word
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line)
+        line = word
+      } else {
+        line = candidate
+      }
+    })
+    if (line) lines.push(line)
+
+    const visibleLines = lines.slice(0, maxLines)
+    if (lines.length > maxLines && visibleLines.length) {
+      let lastLine = visibleLines[visibleLines.length - 1]
+      while (lastLine && context.measureText(`${lastLine}...`).width > maxWidth) lastLine = lastLine.slice(0, -1)
+      visibleLines[visibleLines.length - 1] = `${lastLine.trimEnd()}...`
+    }
+    visibleLines.forEach((visibleLine, index) => context.fillText(visibleLine, x, y + index * lineHeight))
+  }
+
+  async function createBookLabelCanvas(book) {
+    const qrModule = await import('https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm')
+    const toDataURL = qrModule.toDataURL || qrModule.default?.toDataURL
+    if (!toDataURL) throw new Error('O gerador QR não está disponível.')
+
+    const qrDataUrl = await toDataURL(labelQrPayload(book), {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 300,
+      color: { dark: '#173e2b', light: '#ffffff' }
+    })
+    const qrImage = new Image()
+    qrImage.src = qrDataUrl
+    await qrImage.decode()
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 1104
+    canvas.height = 600
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Não foi possível preparar a etiqueta.')
+
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.strokeStyle = '#d8e3da'
+    context.lineWidth = 4
+    context.strokeRect(2, 2, canvas.width - 4, canvas.height - 4)
+    context.fillStyle = '#1e5b3d'
+    context.fillRect(0, 0, 18, canvas.height)
+    context.fillStyle = '#1e5b3d'
+    context.font = '700 22px Georgia, serif'
+    context.fillText('LIBRIS', 58, 82)
+    context.fillStyle = '#718078'
+    context.font = '600 17px Arial, sans-serif'
+    context.fillText(String(config.schoolName || 'Biblioteca escolar').toLocaleUpperCase('pt-BR').slice(0, 48), 58, 112)
+    context.strokeStyle = '#e2e9e4'
+    context.lineWidth = 2
+    context.beginPath()
+    context.moveTo(58, 138)
+    context.lineTo(745, 138)
+    context.stroke()
+
+    context.fillStyle = '#24352b'
+    context.font = '700 38px Georgia, serif'
+    drawWrappedLabelText(context, book.title || 'Livro sem título', 58, 206, 655, 52, 2)
+    context.fillStyle = '#4f6256'
+    context.font = '500 25px Arial, sans-serif'
+    drawWrappedLabelText(context, book.author || 'Autoria não informada', 58, 326, 650, 34, 2)
+
+    context.fillStyle = '#1e5b3d'
+    context.font = '700 18px Arial, sans-serif'
+    context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 418)
+    context.fillStyle = '#718078'
+    context.font = '600 15px Arial, sans-serif'
+    context.fillText('CÓDIGO DO ACERVO', 58, 490)
+    context.fillStyle = '#24352b'
+    context.font = '700 34px Arial, sans-serif'
+    context.fillText(String(book.code || '').toLocaleUpperCase('pt-BR').slice(0, 18), 58, 540)
+
+    context.fillStyle = '#ffffff'
+    context.fillRect(798, 160, 246, 310)
+    context.drawImage(qrImage, 812, 164, 218, 218)
+    context.fillStyle = '#718078'
+    context.font = '700 14px Arial, sans-serif'
+    context.textAlign = 'center'
+    context.fillText('IDENTIFICAÇÃO DIGITAL', 921, 416)
+    context.fillStyle = '#1e5b3d'
+    context.font = '700 17px Arial, sans-serif'
+    context.fillText('ESCANEIE PARA CONFERIR', 921, 446)
+    context.textAlign = 'start'
+
+    return canvas
+  }
+
+  let labelPreviewRequest = 0
+
+  function renderLabelBookList() {
+    const list = $('#labelBookList')
+    if (!list) return
+    const queryText = ($('#labelBookSearchInput')?.value || '').trim().toLocaleLowerCase('pt-BR')
+    const books = state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText)))
+
+    list.innerHTML = books.length ? books.map((book) => `
+      <label class="label-book-option">
+        <input type="checkbox" data-label-book="${esc(book.id)}" ${selectedLabelBookIds.has(book.id) ? 'checked' : ''} />
+        <span><strong>${esc(book.title || 'Livro sem título')}</strong><small>${esc(book.code || 'Sem código')} · ${esc(book.author || 'Autoria não informada')}</small></span>
+      </label>
+    `).join('') : '<p class="label-book-empty">Nenhum livro encontrado nesta escola.</p>'
+  }
+
+  async function updateLabelPreview() {
+    const books = selectedLabelBooks()
+    const empty = $('#labelPreviewEmpty')
+    const canvas = $('#labelPreviewCanvas')
+    const caption = $('#labelPreviewCaption')
+    const count = $('#labelSelectionCount')
+    const jpgButton = $('#downloadLabelsJpgBtn')
+    const pdfButton = $('#downloadLabelsPdfBtn')
+    const requestId = ++labelPreviewRequest
+
+    if (count) count.textContent = `${books.length} selecionado${books.length === 1 ? '' : 's'}`
+    if (jpgButton) {
+      jpgButton.disabled = books.length === 0 || books.length > 20
+      jpgButton.title = books.length > 20 ? 'Selecione até 20 livros para gerar uma única folha JPG.' : ''
+    }
+    if (pdfButton) pdfButton.disabled = books.length === 0
+
+    if (!books.length) {
+      if (empty) empty.hidden = false
+      if (canvas) canvas.hidden = true
+      if (caption) caption.hidden = true
+      return
+    }
+
+    if (empty) empty.hidden = true
+    if (canvas) canvas.hidden = false
+    if (caption) caption.hidden = false
+    if (caption) caption.textContent = 'Gerando a prévia em alta resolução…'
+
+    try {
+      const labelCanvas = await createBookLabelCanvas(books[0])
+      if (requestId !== labelPreviewRequest || !canvas) return
+      const context = canvas.getContext('2d')
+      context?.clearRect(0, 0, canvas.width, canvas.height)
+      context?.drawImage(labelCanvas, 0, 0, canvas.width, canvas.height)
+      if (caption) caption.textContent = books.length > 1 ? `Prévia da primeira de ${books.length} etiquetas.` : 'Etiqueta no formato pronto para impressão.'
+    } catch (err) {
+      console.error('Falha ao gerar prévia QR:', err)
+      if (caption) caption.textContent = 'Não foi possível gerar o QR. Confira sua conexão e tente novamente.'
+    }
+  }
+
+  function renderLabelSelection() {
+    renderLabelBookList()
+    updateLabelPreview()
+  }
+
+  function downloadCanvas(canvas, filename) {
+    const link = document.createElement('a')
+    link.download = filename
+    link.href = canvas.toDataURL('image/jpeg', 0.94)
+    link.click()
+  }
+
+  async function downloadLabelSheetJpg() {
+    const books = selectedLabelBooks()
+    if (!books.length || books.length > 20) return
+    const button = $('#downloadLabelsJpgBtn')
+    loading(button, true, 'Gerando JPG…')
+    try {
+      const labels = await Promise.all(books.map(createBookLabelCanvas))
+      const columns = 2
+      const rows = Math.ceil(labels.length / columns)
+      const gap = 24
+      const sheet = document.createElement('canvas')
+      sheet.width = 2 * 1104 + 3 * gap
+      sheet.height = rows * 600 + (rows + 1) * gap
+      const context = sheet.getContext('2d')
+      context.fillStyle = '#f1f4f1'
+      context.fillRect(0, 0, sheet.width, sheet.height)
+      labels.forEach((labelCanvas, index) => {
+        const column = index % columns
+        const row = Math.floor(index / columns)
+        context.drawImage(labelCanvas, gap + column * (1104 + gap), gap + row * (600 + gap))
+      })
+      const safeSchoolId = String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')
+      downloadCanvas(sheet, `etiquetas-${safeSchoolId}.jpg`)
+    } catch (err) {
+      console.error('Falha ao gerar etiquetas JPG:', err)
+      toast('Não foi possível gerar o JPG. Tente novamente.', 'error')
+    } finally {
+      loading(button, false)
+    }
+  }
+
+  async function downloadLabelSheetPdf() {
+    const books = selectedLabelBooks()
+    if (!books.length) return
+    const button = $('#downloadLabelsPdfBtn')
+    loading(button, true, 'Gerando PDF…')
+    try {
+      const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm')
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
+      const cardWidth = 90
+      const cardHeight = cardWidth * 600 / 1104
+      const columnGap = 10
+      const rowGap = 5
+      const leftMargin = 10
+      const topMargin = 14
+
+      for (const [index, book] of books.entries()) {
+        if (index > 0 && index % 10 === 0) pdf.addPage()
+        const position = index % 10
+        const column = position % 2
+        const row = Math.floor(position / 2)
+        const x = leftMargin + column * (cardWidth + columnGap)
+        const y = topMargin + row * (cardHeight + rowGap)
+        const labelCanvas = await createBookLabelCanvas(book)
+        pdf.addImage(labelCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, cardWidth, cardHeight, undefined, 'FAST')
+      }
+
+      pdf.setProperties({ title: `Etiquetas de ${config.schoolName}`, subject: `Acervo ${config.currentSchoolId}`, author: 'Libris' })
+      const safeSchoolId = String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')
+      pdf.save(`etiquetas-${safeSchoolId}.pdf`)
+    } catch (err) {
+      console.error('Falha ao gerar etiquetas PDF:', err)
+      toast('Não foi possível gerar o PDF. Tente novamente.', 'error')
+    } finally {
+      loading(button, false)
+    }
+  }
+
+function watchAdminCollection(name, schoolId, onData) {
+  return new Promise((resolve, reject) => {
+    let waitingForFirstSnapshot = true
+    const unsubscribe = onSnapshot(
+      query(collection(db, name), where('schoolId', '==', schoolId)),
+      (snap) => {
+        onData(snap)
+        if (waitingForFirstSnapshot) {
+          waitingForFirstSnapshot = false
+          resolve()
+        }
+      },
+      (err) => {
+        if (waitingForFirstSnapshot) {
+          waitingForFirstSnapshot = false
+          reject(err)
+        } else {
+          error(err)
+        }
+      }
+    )
+    state.adminUnsubs.push(unsubscribe)
+  })
+}
+
+async function subscribeAdmin() {
   if (!canUseFirebase || !db) return
   clearAdminSubscriptions()
   const activeSchoolId = config.currentSchoolId
 
-  // Books (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.books = snap.docs.map((d) => {
-      const data = d.data()
-      const total = Number(data.total || 0)
-      const available = Number(data.available ?? total)
-      return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
+  await Promise.all([
+    watchAdminCollection('books', activeSchoolId, (snap) => {
+      state.books = snap.docs.map((d) => {
+        const data = d.data()
+        const total = Number(data.total || 0)
+        const available = Number(data.available ?? total)
+        return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
+      })
+      renderBooks(); renderDashboard()
+    }),
+    watchAdminCollection('categories', activeSchoolId, (snap) => {
+      state.categories = snap.docs.map((d) => ({ ...d.data(), id: d.data().id || d.id, docId: d.id }))
+      renderCategorySelect(); renderCategoryList(); renderBooks(); renderDashboard()
+    }),
+    watchAdminCollection('readers', activeSchoolId, (snap) => {
+      state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      renderReaders(); renderDashboard()
+    }),
+    watchAdminCollection('loans', activeSchoolId, (snap) => {
+      state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      renderLoans(); renderDashboard()
     })
-    renderBooks(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Categories (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.categories = snap.docs.map((d) => ({ id: d.data().id || d.id, ...d.data() }))
-    renderCategorySelect(); renderCategoryList(); renderBooks(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Readers (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    renderReaders(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Loans (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    renderLoans(); renderDashboard()
-  }, (err) => error(err)))
+  ])
 }
 
 /* -------------------------
@@ -949,25 +1436,41 @@ function updateReaderFields() {
 function renderLoans() {
   const tbody = $('#loansTableBody')
   if (!tbody) return
+  const queryText = state.loanQuery.trim().toLocaleLowerCase('pt-BR')
 
   const list = state.loans.filter((l) => {
     if (l.status !== 'active') return false
 
     const reader = state.readers.find((r) => r.id === l.readerId)
     const role = String(reader?.role || reader?.type || '').toLowerCase()
+    const matchesFilter = state.loanFilter === 'student'
+      ? role === 'student' || role === 'aluno'
+      : state.loanFilter === 'teacher'
+        ? role === 'teacher' || role === 'professor'
+        : state.loanFilter === 'overdue'
+          ? overdue(l)
+          : true
+    if (!matchesFilter) return false
 
-    if (state.loanFilter === 'student') return role === 'student' || role === 'aluno'
-    if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
-    if (state.loanFilter === 'overdue') return overdue(l)
-    
-    return true
+    const searchFields = [
+      l.bookTitle,
+      l.bookCode,
+      l.readerName,
+      reader?.name,
+      reader?.email,
+      reader?.phone,
+      reader?.matricula,
+      reader?.course,
+      reader?.class
+    ]
+    return !queryText || searchFields.some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText))
   })
 
   tbody.innerHTML = list.length ? list.map((l) => {
     const selectedDays = Number(l.days || 7)
     const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
     return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
-  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
+  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo corresponde à busca e aos filtros.</td></tr>'
 
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return))
   $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew))
@@ -999,53 +1502,140 @@ function notify(id) {
    QR scanner
    ------------------------- */
 let qrScannerStream = null
-let qrScanFrame = null
+let qrScannerControls = null
+let qrHardwareScanTimer = null
 
 function stopQrScanner() {
-  if (qrScanFrame) cancelAnimationFrame(qrScanFrame)
-  qrScanFrame = null
-  qrScannerStream?.getTracks().forEach((track) => track.stop())
-  qrScannerStream = null
+  clearTimeout(qrHardwareScanTimer)
+  qrHardwareScanTimer = null
+  qrScannerControls?.stop()
+  qrScannerControls = null
   const video = $('#qrScannerVideo')
+  const stream = qrScannerStream || video?.srcObject
+  stream?.getTracks().forEach((track) => track.stop())
+  qrScannerStream = null
   if (video) {
     video.pause()
     video.srcObject = null
   }
 }
 
-async function startQrScanner() {
-  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return toast('Seu navegador não oferece leitura de QR code. Digite o ID do livro.', 'error')
-  const video = $('#qrScannerVideo')
-  const status = $('#qrScannerStatus')
+function openQrScanner() {
+  stopQrScanner()
+  if ($('#qrCameraPanel')) $('#qrCameraPanel').hidden = true
+  if ($('#qrHardwarePanel')) $('#qrHardwarePanel').hidden = true
+  if ($('#qrCameraModeBtn')) $('#qrCameraModeBtn').classList.remove('is-active')
+  if ($('#qrHardwareModeBtn')) $('#qrHardwareModeBtn').classList.remove('is-active')
+  if ($('#qrCameraModeBtn')) $('#qrCameraModeBtn').setAttribute('aria-pressed', 'false')
+  if ($('#qrHardwareModeBtn')) $('#qrHardwareModeBtn').setAttribute('aria-pressed', 'false')
+  if ($('#hardwareScannerInput')) $('#hardwareScannerInput').value = ''
   modal('qrScannerModal', true)
-  try {
-    qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-    if (video) video.srcObject = qrScannerStream
-    if (video) await video.play()
-    if (status) status.textContent = 'Aponte a câmera para o código do livro.'
-    const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
-    const scan = async () => {
-      if (!qrScannerStream) return
-      try {
-        const codes = await detector.detect(video)
-        const code = codes.find((item) => item.rawValue)?.rawValue
-        if (code) {
-          if ($('#bookCodeInput')) $('#bookCodeInput').value = code.trim().toUpperCase()
-          stopQrScanner()
-          modal('qrScannerModal', false)
-          toast('ID do livro preenchido pelo QR code.')
-          return
-        }
-      } catch (err) {
-        console.warn('Não foi possível ler o QR code:', err)
-      }
-      qrScanFrame = requestAnimationFrame(scan)
+  $('#qrCameraModeBtn')?.focus()
+}
+
+function acceptScannedBook(rawValue) {
+  const normalizedValue = String(rawValue || '').trim()
+  if (!normalizedValue) return false
+
+  let payload = null
+  try { payload = JSON.parse(normalizedValue) } catch { /* Leitores antigos podem enviar somente o código */ }
+  if (payload?.schoolId && payload.schoolId !== config.currentSchoolId) {
+    const message = 'Este código pertence a outra escola. Use uma etiqueta desta unidade.'
+    if ($('#hardwareScannerStatus')) $('#hardwareScannerStatus').textContent = message
+    if ($('#qrScannerStatus')) $('#qrScannerStatus').textContent = message
+    toast(message, 'error')
+    return false
+  }
+
+  const matchedCode = payload?.code || normalizedValue.match(/(?:^|[^A-Z0-9])([A-Z0-9]{1,4}-\d{4})(?:$|[^A-Z0-9])/i)?.[1] || normalizedValue
+  const book = payload?.bookId
+    ? state.books.find((item) => item.id === payload.bookId)
+    : state.books.find((item) => item.code?.toUpperCase() === String(matchedCode).toUpperCase())
+  if (!book) {
+    const message = 'Livro não encontrado no acervo desta escola.'
+    if ($('#hardwareScannerStatus')) $('#hardwareScannerStatus').textContent = message
+    if ($('#qrScannerStatus')) $('#qrScannerStatus').textContent = `${message} Aponte para outra etiqueta.`
+    toast(message, 'error')
+    return false
+  }
+
+  if ($('#bookCodeInput')) $('#bookCodeInput').value = String(book.code || matchedCode).toUpperCase()
+  stopQrScanner()
+  modal('qrScannerModal', false)
+  $('#bookCodeInput')?.focus()
+  toast('Código lido. Confira o livro e registre o empréstimo.')
+  return true
+}
+
+function processHardwareScan() {
+  const input = $('#hardwareScannerInput')
+  const value = input?.value.trim()
+  if (!value) return
+  const accepted = acceptScannedBook(value)
+  if (!accepted && input) {
+    input.value = ''
+    input.focus()
+  }
+}
+
+function selectQrInputMode(mode) {
+  stopQrScanner()
+  const useCamera = mode === 'camera'
+  if ($('#qrCameraPanel')) $('#qrCameraPanel').hidden = !useCamera
+  if ($('#qrHardwarePanel')) $('#qrHardwarePanel').hidden = useCamera
+  if ($('#qrCameraModeBtn')) $('#qrCameraModeBtn').classList.toggle('is-active', useCamera)
+  if ($('#qrHardwareModeBtn')) $('#qrHardwareModeBtn').classList.toggle('is-active', !useCamera)
+  if ($('#qrCameraModeBtn')) $('#qrCameraModeBtn').setAttribute('aria-pressed', String(useCamera))
+  if ($('#qrHardwareModeBtn')) $('#qrHardwareModeBtn').setAttribute('aria-pressed', String(!useCamera))
+
+  if (useCamera) {
+    startQrCamera()
+  } else {
+    if ($('#hardwareScannerInput')) {
+      $('#hardwareScannerInput').value = ''
+      $('#hardwareScannerInput').focus()
     }
-    scan()
+    if ($('#hardwareScannerStatus')) $('#hardwareScannerStatus').textContent = 'Leitor pronto. Mire o código ou escaneie a etiqueta QR.'
+  }
+}
+
+async function startQrCamera() {
+  const status = $('#qrScannerStatus')
+  if (!navigator.mediaDevices?.getUserMedia) {
+    const message = 'Este navegador não oferece acesso seguro à câmera. Escolha um leitor externo.'
+    if (status) status.textContent = message
+    return toast(message, 'error')
+  }
+  const video = $('#qrScannerVideo')
+  if (!video) return toast('A janela do leitor QR não está disponível.', 'error')
+  if (status) status.textContent = 'Carregando leitor QR e solicitando acesso à câmera…'
+  try {
+    const { BrowserQRCodeReader } = await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm')
+    const reader = new BrowserQRCodeReader()
+    qrScannerControls = await reader.decodeFromVideoDevice(
+      undefined,
+      video,
+      (result, scanError, controls) => {
+        if (result) {
+          if (acceptScannedBook(result.getText())) controls.stop()
+        }
+        if (scanError && scanError.name !== 'NotFoundException') {
+          console.warn('Falha durante a leitura do QR code:', scanError)
+        }
+      },
+      { video: { facingMode: { ideal: 'environment' } }, audio: false }
+    )
+    qrScannerStream = video.srcObject
+    if (status) status.textContent = 'Aponte a câmera para o QR code do livro.'
   } catch (err) {
     stopQrScanner()
-    modal('qrScannerModal', false)
-    toast(err?.name === 'NotAllowedError' ? 'Permita o acesso à câmera para escanear o livro.' : 'Não foi possível abrir a câmera.', 'error')
+    const message = err?.name === 'NotAllowedError'
+      ? 'Permita o acesso à câmera para escanear o livro.'
+      : err?.name === 'NotFoundError'
+        ? 'Nenhuma câmera foi encontrada neste dispositivo.'
+        : 'Não foi possível iniciar o leitor QR. Digite o código do livro manualmente.'
+    if (status) status.textContent = `${message} Você também pode escolher um leitor externo.`
+    toast(message, 'error')
   }
 }
 
@@ -1061,7 +1651,30 @@ function setup() {
 
   if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }
   if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
-  if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : '' }
+  if ($('#loanSearchInput')) $('#loanSearchInput').oninput = (x) => { state.loanQuery = x.target.value; renderLoans() }
+  if ($('#readerInput')) {
+    $('#readerInput').oninput = () => {
+      if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
+      renderReaderSelector()
+    }
+    $('#readerInput').onkeydown = (event) => {
+      if (event.key === 'Enter' && !$('#loanReaderIdInput')?.value) {
+        const firstOption = $('[data-select-loan-reader]')
+        if (firstOption) {
+          event.preventDefault()
+          selectLoanReader(firstOption.dataset.selectLoanReader)
+        }
+      }
+      if (event.key === 'Escape' && $('#readerSuggestions')) {
+        $('#readerSuggestions').hidden = true
+        $('#readerInput').setAttribute('aria-expanded', 'false')
+      }
+    }
+  }
+  if ($('#readerSuggestions')) $('#readerSuggestions').onclick = (event) => {
+    const option = event.target.closest('[data-select-loan-reader]')
+    if (option) selectLoanReader(option.dataset.selectLoanReader)
+  }
 
   if ($('#bookForm')) $('#bookForm').onsubmit = addBook
   if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory
@@ -1069,18 +1682,69 @@ function setup() {
   if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
   if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
   if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
-  if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner
+  if ($('#scanBtn')) $('#scanBtn').onclick = openQrScanner
+  if ($('#qrScannerModal')) $('#qrScannerModal').onclick = (event) => {
+    const modeButton = event.target.closest('[data-qr-mode]')
+    if (modeButton) selectQrInputMode(modeButton.dataset.qrMode)
+  }
+  if ($('#hardwareScannerInput')) {
+    $('#hardwareScannerInput').oninput = () => {
+      clearTimeout(qrHardwareScanTimer)
+      if ($('#hardwareScannerStatus')) $('#hardwareScannerStatus').textContent = 'Leitura recebida. Aguardando o término do código…'
+      qrHardwareScanTimer = setTimeout(processHardwareScan, 350)
+    }
+    $('#hardwareScannerInput').onkeydown = (event) => {
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        processHardwareScan()
+      }
+    }
+  }
 
   if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true) }
   if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true) }
   if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true) }
+  if ($('#openBookLabelsBtn')) $('#openBookLabelsBtn').onclick = () => {
+    if ($('#labelBookSearchInput')) $('#labelBookSearchInput').value = ''
+    renderLabelSelection()
+    modal('bookLabelsModal', true)
+  }
+  if ($('#labelBookSearchInput')) $('#labelBookSearchInput').oninput = renderLabelBookList
+  if ($('#labelBookList')) $('#labelBookList').onchange = (event) => {
+    const checkbox = event.target.closest('[data-label-book]')
+    if (!checkbox) return
+    if (checkbox.checked) selectedLabelBookIds.add(checkbox.dataset.labelBook)
+    else selectedLabelBookIds.delete(checkbox.dataset.labelBook)
+    updateLabelPreview()
+  }
+  if ($('#selectLabelSearchResultsBtn')) $('#selectLabelSearchResultsBtn').onclick = () => {
+    const queryText = ($('#labelBookSearchInput')?.value || '').trim().toLocaleLowerCase('pt-BR')
+    state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText))).forEach((book) => selectedLabelBookIds.add(book.id))
+    renderLabelSelection()
+  }
+  if ($('#clearLabelSelectionBtn')) $('#clearLabelSelectionBtn').onclick = () => {
+    selectedLabelBookIds.clear()
+    renderLabelSelection()
+  }
+  if ($('#downloadLabelsJpgBtn')) $('#downloadLabelsJpgBtn').onclick = downloadLabelSheetJpg
+  if ($('#downloadLabelsPdfBtn')) $('#downloadLabelsPdfBtn').onclick = downloadLabelSheetPdf
 
   if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false)
   if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false)
-  if ($('#exportBtn')) $('#exportBtn').onclick = exportCsv
-  if ($('#exportXlsxBtn')) $('#exportXlsxBtn').onclick = exportXlsx
+  if ($('#exportBtn')) $('#exportBtn').onclick = () => modal('exportModal', true)
+  if ($('#exportCsvOption')) $('#exportCsvOption').onclick = exportCsv
+  if ($('#exportXlsxOption')) $('#exportXlsxOption').onclick = exportXlsx
+  if ($('#openSettingsBtn')) $('#openSettingsBtn').onclick = () => {
+    syncSchoolSettingsForm()
+    modal('settingsModal', true)
+  }
 
-  $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) })
+  $$('.modal [data-close]').forEach((b) => b.onclick = () => {
+    if (b.dataset.close === 'loginModal' && state.profile?.role !== 'admin') return
+    if (b.dataset.close === 'settingsModal' && !config.schoolName.trim()) return
+    if (b.dataset.close === 'qrScannerModal') stopQrScanner()
+    modal(b.dataset.close, false)
+  })
 
   if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }
   if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp')
@@ -1088,11 +1752,9 @@ function setup() {
   if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 
   if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
-    // CLEAR subscriptions immediately to avoid orphan listeners
-    try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed before signOut:', e) }
+    resetAdminState()
+    modal('loginModal', true)
     if (!canUseFirebase || !auth) {
-      state.user = null
-      if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
       toast('Sessão local encerrada.')
       return
     }
@@ -1107,6 +1769,8 @@ async function saveSchoolSettings(event) {
   event.preventDefault()
   if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
 
+  const schoolName = $('#schoolNameInput')?.value.trim() || ''
+  if (!schoolName) return toast('Informe o nome da escola.', 'error')
   const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
   const reminderDays = Number($('#reminderDaysInput')?.value || 1)
   const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
@@ -1118,6 +1782,7 @@ async function saveSchoolSettings(event) {
   try {
     const schoolRef = doc(db, 'schools', config.currentSchoolId)
     await setDoc(schoolRef, {
+      name: schoolName,
       coordinationEmail,
       reminderDays,
       coordinationDays,
@@ -1127,14 +1792,17 @@ async function saveSchoolSettings(event) {
       updatedAt: serverTimestamp()
     }, { merge: true })
 
+  config.schoolName = schoolName
     config.coordinationEmail = coordinationEmail
     config.reminderDays = reminderDays
     config.coordinationDays = coordinationDays
     config.maxBooksStudent = maxBooksStudent
     config.maxBooksTeacher = maxBooksTeacher
     config.teacherLoanDays = teacherLoanDays
+    if ($('#schoolName')) $('#schoolName').textContent = schoolName
     syncSchoolSettingsForm(config)
-    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    modal('settingsModal', false)
     toast('Configurações salvas com sucesso.')
   } catch (err) {
     error(err, 'Não foi possível salvar as configurações da escola.')
@@ -1142,6 +1810,7 @@ async function saveSchoolSettings(event) {
 }
 
 function syncSchoolSettingsForm(data = config) {
+  const schoolNameInput = $('#schoolNameInput')
   const coordinationEmailInput = $('#coordinationEmailInput')
   const reminderDaysInput = $('#reminderDaysInput')
   const coordinationDaysInput = $('#coordinationDaysInput')
@@ -1150,6 +1819,7 @@ function syncSchoolSettingsForm(data = config) {
   const teacherLoanDaysInput = $('#teacherLoanDaysInput')
   const settings = data || {}
 
+  if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
   if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
   if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
   if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
@@ -1158,63 +1828,7 @@ function syncSchoolSettingsForm(data = config) {
   if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
-/* Ensure current school data present */
-async function ensureCurrentSchoolId() {
-  if (!canUseFirebase || !db) return
-
-  try {
-    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (schoolDoc.exists()) {
-      const data = schoolDoc.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      syncSchoolSettingsForm()
-      return
-    }
-
-    const schoolsSnap = await getDocs(collection(db, 'schools'))
-    if (!schoolsSnap.empty) {
-      const firstSchool = schoolsSnap.docs[0]
-      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
-      config.currentSchoolId = firstSchoolId
-      const data = firstSchool.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-    } else {
-      config.currentSchoolId = 'escola-padrao'
-      config.schoolName = 'Biblioteca escolar'
-      config.coordinationEmail = ''
-      config.reminderDays = 1
-      config.coordinationDays = 7
-      config.maxBooksStudent = 2
-      config.maxBooksTeacher = 35
-      config.teacherLoanDays = 21
-    }
-    syncSchoolSettingsForm()
-  } catch (err) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
-    config.coordinationEmail = ''
-    config.reminderDays = 1
-    config.coordinationDays = 7
-    config.maxBooksStudent = 2
-    config.maxBooksTeacher = 35
-    config.teacherLoanDays = 21
-    syncSchoolSettingsForm()
-  }
-}
-
-/* Resolve user profile and its school */
+/* Load school settings after profile authorization */
 async function loadSchoolData(schoolId = config.currentSchoolId) {
   if (!canUseFirebase || !db) return
 
@@ -1223,35 +1837,31 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
     const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
     if (school.exists()) {
       const data = school.data()
-      if (data.name) config.schoolName = data.name
+      config.schoolName = String(data.name || '').trim()
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+    } else {
+      return false
     }
     const schoolNameNode = $('#schoolName')
     if (schoolNameNode) schoolNameNode.textContent = config.schoolName
     syncSchoolSettingsForm()
+    return true
   } catch (err) {
     error(err, 'Não foi possível carregar a escola vinculada ao login.')
+    return false
   }
 }
 
 async function resolveUserSchool(user) {
-  if (!canUseFirebase || !db || !user) {
-    await ensureCurrentSchoolId()
-    const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
-    return
-  }
+  if (!canUseFirebase || !db || !user) return null
 
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid))
-    const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
-    await loadSchoolData(schoolId)
-    await ensureCurrentSchoolId()
     return userDoc.exists() ? userDoc.data() : null
   } catch (err) {
     error(err, 'Não foi possível recuperar a escola deste usuário.')
@@ -1262,23 +1872,6 @@ async function resolveUserSchool(user) {
 /* -------------------------
    Initialization
    ------------------------- */
-function hydrateFallbackData() {
-  state.categories = [...defaultCategories]
-  state.books = fallbackBooks.map((book) => {
-    const total = Number(book.total || 0)
-    const available = Number(book.available ?? total)
-    return { ...book, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
-  })
-  state.readers = fallbackReaders
-  state.loans = fallbackLoans.map((loan) => ({ ...loan, dueAt: loan.dueAt instanceof Date ? loan.dueAt : new Date(loan.dueAt), status: loan.status || 'active' }))
-  renderCategorySelect()
-  renderCategoryList()
-  renderBooks()
-  renderReaders()
-  renderLoans()
-  renderDashboard()
-}
-
 setup()
 syncSchoolSettingsForm()
 
@@ -1308,7 +1901,6 @@ if ($('#loginForm')) {
 
     try {
       await signInWithEmailAndPassword(auth, email, password)
-      modal('loginModal', false)
     } catch (err) {
       error(err)
     } finally {
@@ -1339,72 +1931,72 @@ async function init() {
   renderReaders()
   renderLoans()
   renderDashboard()
+  const adminView = $('#adminView')
+  const settingsButton = $('#openSettingsBtn')
+  const logoutButton = $('#logoutBtn')
+  if (adminView) adminView.hidden = true
+  if (settingsButton) settingsButton.hidden = true
+  if (logoutButton) logoutButton.hidden = true
 
   if (!canUseFirebase || !db) {
-    hydrateFallbackData()
     state.user = null
-    if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
+    state.profile = null
+    modal('loginModal', true)
+    toast('Firebase Auth indisponível. Verifique a configuração do projeto.', 'error')
     return
   }
 
-  try {
-    await ensureCurrentSchoolId()
-    renderCategorySelect()
-    renderCategoryList()
-    renderBooks()
-    renderReaders()
-    renderLoans()
-    renderDashboard()
-
-    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (school.exists()) {
-      const data = school.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      syncSchoolSettingsForm()
-    }
-    if ($('#schoolName')) $('#schoolName').textContent = config.schoolName
-  } catch (err) { error(err) }
-
   onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+      resetAdminState()
+      modal('loginModal', true)
+      $('#loginForm input[type="email"]')?.focus()
+      return
+    }
+
     state.user = user
-    if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user)
-    if (user) {
-      const schoolBeforeProfile = config.currentSchoolId
-      state.profile = await resolveUserSchool(user)
-      if (state.profile?.role !== 'admin') {
-        // Immediate cleanup before forcing sign out to avoid orphan listeners
-        try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed:', e) }
-        state.profile = null
-        state.user = null
-        toast('Esta conta não possui acesso administrativo.', 'error')
-        try { await signOut(auth) } catch (e) { /* ignore */ }
-        return
-      }
-      if (schoolBeforeProfile !== config.currentSchoolId) {
-        // If school changed as part of profile resolution, refresh admin subscriptions bound to new school
-        subscribeAdmin()
-      } else {
-        subscribeAdmin()
-      }
-    } else {
-      // user logged out -> clear admin subscriptions and reset admin state
+    state.profile = await resolveUserSchool(user)
+    if (auth.currentUser?.uid !== user.uid) return
+
+    if (state.profile?.role !== 'admin' || typeof state.profile.schoolId !== 'string' || !state.profile.schoolId.trim()) {
+      resetAdminState()
+      modal('loginModal', true)
+      toast('Esta conta não possui acesso administrativo vinculado a uma escola.', 'error')
+      try { await signOut(auth) } catch (e) { /* ignore */ }
+      return
+    }
+
+    if (!await loadSchoolData(state.profile.schoolId)) {
+      resetAdminState()
+      modal('loginModal', true)
+      toast('A escola vinculada ao administrador não foi encontrada.', 'error')
+      try { await signOut(auth) } catch (e) { /* ignore */ }
+      return
+    }
+
+    if (auth.currentUser?.uid !== user.uid) return
+    try {
+      await subscribeAdmin()
+    } catch (err) {
+      error(err, 'Não foi possível carregar os dados administrativos desta escola.')
+      resetAdminState()
+      modal('loginModal', true)
+      try { await signOut(auth) } catch (e) { /* ignore */ }
+      return
+    }
+    if (auth.currentUser?.uid !== user.uid) {
       clearAdminSubscriptions()
-      state.profile = null
-      state.readers = []
-      state.loans = []
-      state.books = []
-      state.categories = []
-      renderReaders()
-      renderLoans()
-      renderBooks()
-      renderCategoryList()
-      renderDashboard()
+      return
+    }
+    if (adminView) adminView.hidden = false
+    if (settingsButton) settingsButton.hidden = false
+    if (logoutButton) logoutButton.hidden = false
+    modal('loginModal', false)
+    if (!config.schoolName) {
+      syncSchoolSettingsForm()
+      modal('settingsModal', true)
+      $('#schoolNameInput')?.focus()
+      toast('Configure os dados da escola para iniciar o painel.')
     }
   })
 }

@@ -28,24 +28,25 @@
           </div>
         </div>
 
-        <div style="display:flex; align-items:center; gap:1rem;">
-          <div id="schoolName" class="eyebrow" style="margin:0; background:rgba(52,160,96,0.06); padding:0.35rem 0.6rem; border-radius:0.6rem;">Biblioteca escolar</div>
-          <button class="btn btn-secondary" id="logoutBtn" type="button">Sair</button>
+        <div class="topbar-actions">
+          <div id="schoolName" class="eyebrow school-label">Biblioteca escolar</div>
+          <button class="icon-btn" id="openSettingsBtn" type="button" aria-label="Abrir configurações" title="Configurações" hidden>
+            <span aria-hidden="true">⚙</span>
+          </button>
+          <button class="btn btn-secondary" id="logoutBtn" type="button" hidden>Sair</button>
         </div>
       </header>
 
       <main class="main-content">
-        <section id="adminView" class="view is-active">
+        <section id="adminView" class="view is-active" hidden>
           <div class="admin-header">
             <div>
               <p class="eyebrow">Menu Administrativo</p>
               <h2>Gestão da biblioteca escolar</h2>
-              <p class="eyebrow" id="schoolName" style="margin-top:0.4rem; background:rgba(52,160,96,0.08);">Biblioteca escolar</p>
             </div>
             <div class="action-row">
               <button class="btn btn-secondary" id="importCsvBtn" type="button">Importar CSV</button>
-              <button class="btn btn-secondary" id="exportBtn" type="button">Exportar CSV</button>
-              <button class="btn btn-secondary" id="exportXlsxBtn" type="button">Exportar XLSX</button>
+              <button class="btn btn-secondary" id="exportBtn" type="button">Exportar</button>
             </div>
           </div>
 
@@ -87,7 +88,6 @@
               <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
               <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
               <button class="tab-btn" data-tab="leitores" type="button">Leitores</button>
-              <button class="tab-btn" data-tab="configuracoes" type="button">Configurações</button>
             </div>
 
             <div class="tab-panel is-active" data-panel="checkout">
@@ -103,13 +103,11 @@
                   </label>
                   <label>
                     <span>Leitor</span>
-                    <input id="readerInput" type="text" placeholder="Matrícula ou Nome" />
-                  </label>
-                  <label>
-                    <span>Selecionar aluno cadastrado</span>
-                    <select id="readerSelectInput">
-                      <option value="">Selecione um leitor</option>
-                    </select>
+                    <div class="reader-picker">
+                      <input id="readerInput" type="search" placeholder="Digite nome, matrícula ou e-mail" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="readerSuggestions" autocomplete="off" />
+                      <input id="loanReaderIdInput" type="hidden" />
+                      <div id="readerSuggestions" class="reader-suggestions" role="listbox" hidden></div>
+                    </div>
                   </label>
                   <label>
                     <span>Prazo</span>
@@ -123,34 +121,41 @@
                 <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
               </div>
 
-             <div class="mt-24 panel">
-  <div class="panel-head flex-between align-center mb-3">
-    <h3>Empréstimos ativos</h3>
-    <div class="filter-select-wrap">
-      <select id="loanFilterSelect" class="input-select">
-        <option value="all">Todos os empréstimos</option>
-        <option value="student">Apenas Alunos</option>
-        <option value="teacher">Apenas Professores</option>
-        <option value="overdue">Apenas Atrasados</option>
-      </select>
-    </div>
-  </div>
+              <div class="mt-24 panel">
+                <div class="loans-toolbar">
+                  <h3>Empréstimos ativos</h3>
+                  <div class="loan-filters">
+                    <label class="loan-search">
+                      <span>Buscar empréstimo</span>
+                      <input id="loanSearchInput" type="search" placeholder="Livro, código, leitor ou matrícula" />
+                    </label>
+                    <label class="loan-status-filter">
+                      <span>Filtrar por</span>
+                      <select id="loanFilterSelect" class="input-select">
+                        <option value="all">Todos os empréstimos</option>
+                        <option value="student">Alunos</option>
+                        <option value="teacher">Professores</option>
+                        <option value="overdue">Atrasados</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
 
-  <div class="table-wrap table-responsive">
-    <table>
-      <thead>
-        <tr>
-          <th>Livro</th>
-          <th>Leitor</th>
-          <th>Vencimento</th>
-          <th>Status</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody id="loansTableBody"></tbody>
-    </table>
-  </div>
-</div>
+                <div class="table-wrap table-responsive records-scroll loans-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Livro</th>
+                        <th>Leitor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="loansTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
 
             <div class="tab-panel" data-panel="acervo">
@@ -159,6 +164,7 @@
                   <h3>Acervo</h3>
                 </div>
                 <div class="action-row">
+                  <button class="btn btn-secondary" type="button" id="openBookLabelsBtn">Etiquetas QR</button>
                   <button class="btn btn-primary" type="button" id="openBookModalBtn">+ Adicionar Novo Livro</button>
                   <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
                 </div>
@@ -168,7 +174,7 @@
                 <div class="panel-head">
                   <h3>Categorias Cadastradas</h3>
                 </div>
-                <div class="table-wrap table-responsive mt-16" id="categoryList"></div>
+                <div class="table-wrap table-responsive records-scroll mt-16" id="categoryList"></div>
               </div>
 
               <div class="mt-24 panel">
@@ -178,7 +184,7 @@
                 </label>
               </div>
 
-              <div class="table-wrap table-responsive mt-24">
+              <div class="table-wrap table-responsive records-scroll mt-24">
                 <table>
                   <thead>
                     <tr>
@@ -212,7 +218,7 @@
                 </label>
               </div>
 
-              <div class="table-wrap table-responsive mt-24">
+              <div class="table-wrap table-responsive records-scroll mt-24">
                 <table>
                   <thead>
                     <tr>
@@ -226,44 +232,6 @@
                   </thead>
                   <tbody id="readersTableBody"></tbody>
                 </table>
-              </div>
-            </div>
-
-            <div class="tab-panel" data-panel="configuracoes">
-              <div class="panel">
-                <div class="panel-head">
-                  <h3>Configurações da escola</h3>
-                </div>
-
-                <form id="schoolSettingsForm" class="form-grid">
-                  <label>
-                    <span>E-mail da coordenação</span>
-                    <input id="coordinationEmailInput" type="email" placeholder="coordenacao@escola.edu.br" />
-                  </label>
-                  <label>
-                    <span>Dias para lembrete</span>
-                    <input id="reminderDaysInput" type="number" min="1" max="30" value="1" />
-                  </label>
-                  <label>
-                    <span>Dias para avisar a coordenação</span>
-                    <input id="coordinationDaysInput" type="number" min="1" max="90" value="7" />
-                  </label>
-                  <label>
-                    <span>Limite de livros ativos por aluno</span>
-                    <input id="maxBooksStudentInput" type="number" min="1" max="20" value="2" />
-                  </label>
-                  <label>
-                    <span>Limite de livros ativos por professor</span>
-                    <input id="maxBooksTeacherInput" type="number" min="1" max="200" value="35" />
-                  </label>
-                  <label>
-                    <span>Dias de empréstimo para professor</span>
-                    <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" />
-                  </label>
-                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
-                    <button class="btn btn-primary" type="submit">Salvar configurações</button>
-                  </div>
-                </form>
               </div>
             </div>
 
@@ -301,6 +269,109 @@
           <button class="btn btn-primary" type="submit">Entrar no painel</button>
           <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
         </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="exportModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="exportModal"></div>
+      <div class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
+        <button class="modal-close" type="button" data-close="exportModal" aria-label="Fechar">×</button>
+        <h3 id="exportModalTitle">Exportar acervo</h3>
+        <p class="modal-description">Escolha o formato do arquivo.</p>
+        <div class="export-options">
+          <button class="export-option" id="exportCsvOption" type="button">
+            <span class="export-file-icon" aria-hidden="true">CSV</span>
+            <span><strong>Planilha CSV</strong><small>Compatível com Excel e outros sistemas</small></span>
+          </button>
+          <button class="export-option" id="exportXlsxOption" type="button">
+            <span class="export-file-icon xlsx" aria-hidden="true">XLSX</span>
+            <span><strong>Planilha Excel</strong><small>Arquivo formatado para Microsoft Excel</small></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="settingsModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="settingsModal"></div>
+      <div class="modal-card settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <button class="modal-close" type="button" data-close="settingsModal" aria-label="Fechar">×</button>
+        <h3 id="settingsModalTitle">Configurações da escola</h3>
+        <form id="schoolSettingsForm" class="form-grid settings-form">
+          <label class="school-name-field">
+            <span>Nome da escola</span>
+            <input id="schoolNameInput" type="text" maxlength="120" placeholder="Nome completo da escola" required />
+          </label>
+          <label>
+            <span>E-mail da coordenação</span>
+            <input id="coordinationEmailInput" type="email" placeholder="coordenacao@escola.edu.br" />
+          </label>
+          <label>
+            <span>Dias para lembrete</span>
+            <input id="reminderDaysInput" type="number" min="1" max="30" value="1" />
+          </label>
+          <label>
+            <span>Dias para avisar a coordenação</span>
+            <input id="coordinationDaysInput" type="number" min="1" max="90" value="7" />
+          </label>
+          <label>
+            <span>Limite de livros ativos por aluno</span>
+            <input id="maxBooksStudentInput" type="number" min="1" max="20" value="2" />
+          </label>
+          <label>
+            <span>Limite de livros ativos por professor</span>
+            <input id="maxBooksTeacherInput" type="number" min="1" max="200" value="35" />
+          </label>
+          <label>
+            <span>Dias de empréstimo para professor</span>
+            <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" />
+          </label>
+          <div class="settings-actions">
+            <button class="btn btn-primary" type="submit">Salvar configurações</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="bookLabelsModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="bookLabelsModal"></div>
+      <div class="modal-card label-modal" role="dialog" aria-modal="true" aria-labelledby="bookLabelsTitle">
+        <button class="modal-close" type="button" data-close="bookLabelsModal" aria-label="Fechar">×</button>
+        <div class="label-modal-heading">
+          <span class="label-heading-mark" aria-hidden="true">L</span>
+          <div>
+            <h3 id="bookLabelsTitle">Etiquetas do acervo</h3>
+            <p>Selecione os livros para montar as etiquetas QR.</p>
+          </div>
+        </div>
+        <div class="label-generator-layout">
+          <section class="label-selection-panel" aria-label="Selecionar livros">
+            <label class="label-search">
+              <span>Buscar livro</span>
+              <input id="labelBookSearchInput" type="search" placeholder="Título, autor ou código" />
+            </label>
+            <div class="label-selection-actions">
+              <button class="small-btn primary" id="selectLabelSearchResultsBtn" type="button">Selecionar resultados</button>
+              <button class="small-btn" id="clearLabelSelectionBtn" type="button">Limpar</button>
+            </div>
+            <div id="labelBookList" class="label-book-list"></div>
+          </section>
+          <section class="label-preview-panel" aria-label="Prévia da etiqueta">
+            <div class="label-preview-heading">
+              <span>PRÉVIA DA ETIQUETA</span>
+              <span id="labelSelectionCount">0 selecionados</span>
+            </div>
+            <div id="labelPreviewEmpty" class="label-preview-empty">Selecione pelo menos um livro para visualizar a etiqueta.</div>
+            <canvas id="labelPreviewCanvas" class="label-preview-canvas" width="1104" height="600" hidden></canvas>
+            <p id="labelPreviewCaption" class="label-preview-caption" hidden></p>
+          </section>
+        </div>
+        <div class="label-modal-footer">
+          <span>JPG gera uma folha de até 20 etiquetas. PDF aceita seleções maiores.</span>
+          <div class="action-row">
+            <button class="btn btn-secondary" id="downloadLabelsJpgBtn" type="button" disabled>Baixar JPG</button>
+            <button class="btn btn-primary" id="downloadLabelsPdfBtn" type="button" disabled>Baixar PDF</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -350,12 +421,24 @@
 
     <div class="modal hidden" id="qrScannerModal" aria-hidden="true">
       <div class="modal-backdrop" data-close="qrScannerModal"></div>
-      <div class="modal-card small">
-        <button class="modal-close" type="button" data-close="qrScannerModal">×</button>
-        <h3>Escanear QR code</h3>
-        <p>Aponte a câmera para o código do livro.</p>
-        <video id="qrScannerVideo" class="qr-scanner-video" autoplay muted playsinline></video>
-        <p id="qrScannerStatus" class="empty-state">Iniciando câmera…</p>
+      <div class="modal-card small qr-modal-card" role="dialog" aria-modal="true" aria-labelledby="qrScannerTitle">
+        <button class="modal-close" type="button" data-close="qrScannerModal" aria-label="Fechar">×</button>
+        <h3 id="qrScannerTitle">Ler código do livro</h3>
+        <p class="modal-description">Escolha como deseja fazer a leitura.</p>
+        <div class="scanner-mode-switch" role="group" aria-label="Modo de leitura">
+          <button class="scanner-mode-btn" id="qrCameraModeBtn" type="button" data-qr-mode="camera" aria-pressed="false">Usar câmera</button>
+          <button class="scanner-mode-btn" id="qrHardwareModeBtn" type="button" data-qr-mode="hardware" aria-pressed="false">Leitor externo</button>
+        </div>
+        <div id="qrCameraPanel" class="scanner-panel" hidden>
+          <video id="qrScannerVideo" class="qr-scanner-video" autoplay muted playsinline></video>
+          <p id="qrScannerStatus" class="scanner-status">Aponte a câmera para o QR code do livro.</p>
+        </div>
+        <div id="qrHardwarePanel" class="scanner-panel hardware-scanner-panel" hidden>
+          <label for="hardwareScannerInput">Aproxime o leitor do código</label>
+          <input id="hardwareScannerInput" type="text" autocomplete="off" placeholder="Aguardando leitura…" />
+          <p>Compatível com leitores USB ou Bluetooth que digitam o código no computador.</p>
+          <span id="hardwareScannerStatus" class="scanner-status" role="status" aria-live="polite">O campo receberá a leitura do dispositivo.</span>
+        </div>
       </div>
     </div>
 
