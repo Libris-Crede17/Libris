@@ -344,7 +344,7 @@ function renderLoans() {
 
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); 
   $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew));
-('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify));
+  $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify));
 
   const filterSelect = $('#loanFilterSelect')
   if (filterSelect) {
