@@ -1,1412 +1,486 @@
-/* Updated script.js — DOM blindagem e limpeza imediata de subscriptions ao signOut.
-   Preserva obrigatoriedade schoolId, validações de estoque e regras de autenticação. */
-
-import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } from './firebase.js'
-import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
-
-const config = {
-  organizationName: 'Libris',
-  currentSchoolId: 'escola-padrao',
-  schoolName: 'Biblioteca escolar',
-  coordinationEmail: '',
-  reminderDays: 1,
-  coordinationDays: 7,
-  maxBooksStudent: 2,
-  maxBooksTeacher: 35,
-  teacherLoanDays: 21,
-  emailjs: { 
-    serviceId: 'service_kj4o9me', 
-    studentTemplateId: 'template_7jhtc1d', 
-    coordinationTemplateId: 'template_05hf89g', 
-    publicKey: '3NnWny8jJqnZwiFWU' 
-  }
-}
-
-const defaultCategories = []
-const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
-const fallbackBooks = []
-const fallbackReaders = []
-const fallbackLoans = []
-const canUseFirebase = Boolean(firebaseReady && auth && db)
-
-const state = {
-  user: null,
-  profile: null,
-  books: [],
-  readers: [],
-  loans: [],
-  csv: [],
-  categories: [...defaultCategories],
-  acervoQuery: '',
-  readerQuery: '',
-  adminUnsubs: [],
-  loanFilter: 'all'
-}
-
-let pendingCsvImport = null
-
-/* -------------------------
-   DOM helpers & utilities (blindados)
-   ------------------------- */
-const $ = (s) => (typeof document !== 'undefined' ? document?.querySelector?.(s) ?? null : null)
-const $$ = (s) => (typeof document !== 'undefined' ? Array.from(document?.querySelectorAll?.(s) || []) : [])
-const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
-const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
-const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
-const available = (b) => Number(b.available || 0) > 0
-const bookStatus = (b) => available(b) ? 'disponivel' : 'emprestado'
-const date = (v) => v?.toDate ? v.toDate() : v ? new Date(v) : null
-const formatDate = (v) => date(v)?.toLocaleDateString('pt-BR') || '—'
-const overdue = (l) => l.status === 'active' && date(l.dueAt) < new Date()
-
-function toast(message, type = 'success') { const el = $('#toast'); if (!el) return; el.textContent = message; el.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = 'toast hidden' }, 4000) }
-function error(err, message = 'Não foi possível conectar ao servidor. Verifique sua conexão.') { console.error(err); toast(err?.code === 'auth/invalid-credential' ? 'E-mail ou senha inválidos.' : message, 'error') }
-function loading(button, value, text = 'Aguarde…') { if (!button) return; button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
-
-/* Modal helper with accessibility blur on close */
-function modal(id, open) { 
-  const el = typeof document !== 'undefined' ? document.getElementById(id) : null
-  if (el) { 
-    if (!open) {
-      const activeElement = el.querySelector(':focus')
-      if (activeElement) activeElement.blur()
-    }
-    el.classList.toggle('hidden', !open)
-    el.setAttribute('aria-hidden', String(!open))
-  }
-}
-
-/* -------------------------
-   Metadata lookup (admin)
-   ------------------------- */
-async function lookupBookMetadata(title, author, publisher) {
-  const query = [title, author, publisher].filter(Boolean).join(' ')
-  if (!query) return { synopsis: '', coverUrl: '' }
-
-  try {
-    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=1&langRestrict=pt`)
-    if (response.ok) {
-      const volume = (await response.json()).items?.[0]?.volumeInfo
-      if (volume) {
-        const coverUrl = volume.imageLinks?.thumbnail?.replace('http://', 'https://') || volume.imageLinks?.smallThumbnail?.replace('http://', 'https://') || ''
-        const synopsis = String(volume.description || '').replace(/<[^>]*>/g, '').trim().slice(0, 700)
-        if (coverUrl || synopsis) return { synopsis, coverUrl }
-      }
-    }
-  } catch (error) {
-    console.warn('Não foi possível buscar dados no Google Books:', error)
-  }
-
-  try {
-    const response = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&publisher=${encodeURIComponent(publisher || '')}&limit=1`)
-    if (!response.ok) return { synopsis: '', coverUrl: '' }
-    const doc = (await response.json()).docs?.[0]
-    if (!doc) return { synopsis: '', coverUrl: '' }
-    const synopsis = Array.isArray(doc.first_sentence) ? doc.first_sentence.join(' ') : String(doc.first_sentence || '')
-    const coverId = doc.cover_i || doc.covers?.[0]
-    return { synopsis: synopsis.slice(0, 700), coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '' }
-  } catch (error) {
-    console.warn('Não foi possível buscar dados na Open Library:', error)
-    return { synopsis: '', coverUrl: '' }
-  }
-}
-
-/* -------------------------
-   UI renderers (admin)
-   ------------------------- */
-function renderCategorySelect() {
-  const select = $('#bookCategoryInput')
-  if (!select) return
-  const categoriesList = state?.categories || []
-  select.innerHTML = categoriesList.map((c) => {
-    const codeVal = String(c.code || c.id || '').toUpperCase()
-    return `<option value="${codeVal}">${esc(c.name)}</option>`
-  }).join('')
-}
-
-function renderCategoryList() {
-  const list = $('#categoryList')
-  if (!list) return
-  list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${c.id}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
-  $$('[data-del-category]').forEach((b) => b.onclick = () => removeCategory(b.dataset.delCategory))
-}
-
-function renderBooks() { 
-  const body = $('#bookTableBody')
-  if (!body) return;
-  const q = state.acervoQuery.toLowerCase().trim()
-  const list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q)))
-  body.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; 
-  $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
-  $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook))
-}
-
-function renderReaderSelector() {
-  const select = $('#readerSelectInput')
-  if (!select) return
-  const options = ['<option value="">Selecione um leitor</option>']
-  state.readers.forEach((reader) => {
-    const labelText = `${reader.name} · ${reader.type}${reader.type === 'Aluno' && reader.matricula ? ` · ${reader.matricula}` : ''}`
-    options.push(`<option value="${reader.id}">${esc(labelText)}</option>`)
-  })
-  select.innerHTML = options.join('')
-}
-
-function renderReaders() { 
-  const body = $('#readersTableBody')
-  if (!body) return;
-  const q = state.readerQuery.toLowerCase().trim()
-  const list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
-  body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
-  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
-  $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
-  renderReaderSelector()
-}
-
-function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
-
-function renderBars(target, data) { if (!target) return; if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
-
-function renderDashboard() { 
-  const active = state.loans.filter((l) => l.status === 'active') 
-  const overdueCount = active.filter(overdue).length
-
-  const values = [
-    ['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚', 'acervo'],
-    ['Empréstimos Ativos', active.length, '📖', 'checkout'],
-    ['Livros em Atraso', overdueCount, '⚠️', 'checkout'],
-    ['Leitores Cadastrados', state.readers.length, '👥', 'leitores']
-  ]
-
-  const kpiGrid = $('#kpiGrid')
-  if (kpiGrid) {
-    kpiGrid.innerHTML = values.map(([name, value, icon, targetTab]) => `
-      <div class="kpi-card panel clickable-kpi" data-target-tab="${targetTab}" style="cursor: pointer;">
-        <div class="kpi-card-head">
-          <span>${esc(name)}</span>
-          <span class="kpi-icon">${icon}</span>
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Libris — Painel Administrativo</title>
+    <link rel="icon" type="image/png" href="Librissf.png" />
+    <meta
+      name="description"
+      content="Painel administrativo da biblioteca escolar Libris."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="Libris">
+          <div class="brand-mark" aria-label="Logo Libris"></div>
+          <div>
+            <p class="brand-title">Libris</p>
+            <p class="brand-subtitle">Painel Administrativo</p>
+          </div>
         </div>
-        <div class="kpi-value">${value}</div>
+
+        <div style="display:flex; align-items:center; gap:1rem;">
+          <div id="schoolName" class="eyebrow" style="margin:0; background:rgba(52,160,96,0.06); padding:0.35rem 0.6rem; border-radius:0.6rem;">Biblioteca escolar</div>
+          <button class="btn btn-secondary" id="logoutBtn" type="button">Sair</button>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <section id="adminView" class="view is-active">
+          <div class="admin-header">
+            <div>
+              <p class="eyebrow">Menu Administrativo</p>
+              <h2>Gestão da biblioteca escolar</h2>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-secondary" id="importCsvBtn" type="button">Importar CSV</button>
+              <button class="btn btn-secondary" id="exportBtn" type="button">Exportar CSV</button>
+              <button class="btn btn-secondary" id="exportXlsxBtn" type="button">Exportar XLSX</button>
+            </div>
+          </div>
+
+          <div id="kpiGrid" class="kpi-grid"></div>
+
+          <div class="dashboard-grid">
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top 5 Gêneros</h3>
+              </div>
+              <div class="bar-chart compact" id="genreChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Status do Acervo</h3>
+              </div>
+              <div class="donut-wrap" id="statusDonut"></div>
+              <div class="status-legend" id="statusLegend"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por Curso/Turma</h3>
+              </div>
+              <div class="bar-chart" id="courseChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top Leitores</h3>
+              </div>
+              <div class="list-chart" id="readerChart"></div>
+            </div>
+          </div>
+
+          <div class="admin-tabs">
+            <div class="tab-buttons">
+              <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
+              <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
+              <button class="tab-btn" data-tab="leitores" type="button">Leitores</button>
+              <button class="tab-btn" data-tab="configuracoes" type="button">Configurações</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="checkout">
+              <div class="checkout-form panel">
+                <h3>Registrar empréstimo</h3>
+                <div class="form-grid">
+                  <label>
+                    <span>ID do livro</span>
+                    <div class="input-row">
+                      <input id="bookCodeInput" type="text" placeholder="Ex: GE-0001" />
+                      <button type="button" class="btn btn-ghost" id="scanBtn">Escanear QR code</button>
+                    </div>
+                  </label>
+                  <label>
+                    <span>Leitor</span>
+                    <input id="readerInput" type="text" placeholder="Matrícula ou Nome" />
+                  </label>
+                  <label>
+                    <span>Selecionar aluno cadastrado</span>
+                    <select id="readerSelectInput">
+                      <option value="">Selecione um leitor</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Prazo</span>
+                    <select id="loanDays">
+                      <option value="7">7 dias</option>
+                      <option value="14">14 dias</option>
+                      <option value="21">21 dias</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
+              </div>
+
+              <div class="mt-24 panel">
+                <div class="panel-head flex-between align-center mb-3">
+                  <h3>Empréstimos ativos</h3>
+                  <div class="filter-select-wrap">
+                    <select id="loanFilterSelect" class="input-select">
+                      <option value="all">Todos os empréstimos</option>
+                      <option value="student">Apenas Alunos</option>
+                      <option value="teacher">Apenas Professores</option>
+                      <option value="overdue">Apenas Atrasados</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="table-wrap table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Livro</th>
+                        <th>Leitor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="loansTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="acervo">
+              <div class="panel panel-header-actions">
+                <div class="panel-head">
+                  <h3>Acervo</h3>
+                </div>
+                <div class="action-row">
+                  <button class="btn btn-primary" type="button" id="openBookModalBtn">+ Adicionar Novo Livro</button>
+                  <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
+                </div>
+              </div>
+
+              <div class="panel mt-24">
+                <div class="panel-head">
+                  <h3>Categorias Cadastradas</h3>
+                </div>
+                <div class="table-wrap table-responsive mt-16" id="categoryList"></div>
+              </div>
+
+              <div class="mt-24 panel">
+                <label>
+                  <span>Buscar no acervo</span>
+                  <input id="acervoSearchInput" type="search" placeholder="Nome do livro, autor ou código" />
+                </label>
+              </div>
+
+              <div class="table-wrap table-responsive mt-24">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Título</th>
+                      <th>Categoria</th>
+                      <th>Tombamento</th>
+                      <th>Quantidade</th>
+                      <th>Localização</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bookTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="leitores">
+              <div class="panel panel-header-actions">
+                <div class="panel-head">
+                  <h3>Leitores</h3>
+                </div>
+                <button class="btn btn-primary" type="button" id="openReaderModalBtn">+ Adicionar Novo Leitor</button>
+              </div>
+
+              <div class="mt-24">
+                <label>
+                  <span>Buscar leitor</span>
+                  <input id="readerSearchInput" type="search" placeholder="Nome, tipo ou ano" />
+                </label>
+              </div>
+
+              <div class="table-wrap table-responsive mt-24">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nome</th>
+                      <th>Tipo</th>
+                      <th>Curso / Turma / Ano</th>
+                      <th>Matrícula / CPF</th>
+                      <th>Contato</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="readersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="configuracoes">
+              <div class="panel">
+                <div class="panel-head">
+                  <h3>Configurações da escola</h3>
+                </div>
+
+                <form id="schoolSettingsForm" class="form-grid">
+                  <label>
+                    <span>E-mail da coordenação</span>
+                    <input id="coordinationEmailInput" type="email" placeholder="coordenacao@escola.edu.br" />
+                  </label>
+                  <label>
+                    <span>Dias para lembrete</span>
+                    <input id="reminderDaysInput" type="number" min="1" max="30" value="1" />
+                  </label>
+                  <label>
+                    <span>Dias para avisar a coordenação</span>
+                    <input id="coordinationDaysInput" type="number" min="1" max="90" value="7" />
+                  </label>
+                  <label>
+                    <span>Limite de livros ativos por aluno</span>
+                    <input id="maxBooksStudentInput" type="number" min="1" max="20" value="2" />
+                  </label>
+                  <label>
+                    <span>Limite de livros ativos por professor</span>
+                    <input id="maxBooksTeacherInput" type="number" min="1" max="200" value="35" />
+                  </label>
+                  <label>
+                    <span>Dias de empréstimo para professor</span>
+                    <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" />
+                  </label>
+                  <div style="display:flex; justify-content:flex-end; grid-column: 1 / -1; margin-top: 0.2rem;">
+                    <button class="btn btn-primary" type="submit">Salvar configurações</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal hidden" id="bookModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="bookModal"></div>
+      <div class="modal-card">
+        <button class="modal-close" type="button" data-close="bookModal">×</button>
+        <div class="book-modal-content" id="bookModalContent"></div>
       </div>
-    `).join('')
-
-    $$('.clickable-kpi').forEach((card) => {
-      card.onclick = () => {
-        const targetTab = card.dataset.targetTab
-        if (targetTab) {
-          if (targetTab === 'checkout') {
-            state.loanFilter = 'all'
-          }
-          $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === targetTab))
-          $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === targetTab))
-          renderLoans()
-        }
-      }
-    })
-  }
-
-  renderBars($('#genreChart'), getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5))
-  const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0)
-  const free = state.books.reduce((n, b) => n + Number(b.available || 0), 0)
-  const percent = total ? Math.round(free / total * 100) : 0
-  if ($('#statusDonut')) $('#statusDonut').innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`
-  if ($('#statusLegend')) $('#statusLegend').innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`
-  renderBars($('#courseChart'), count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
-  const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
-  if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
-}
-
-/* -------------------------
-   CRUD Admin actions
-   ------------------------- */
-function normalizeBookCode(value) {
-  return String(value ?? '').replace(/\D+/g, '').slice(0, 4).padStart(4, '0')
-}
-
-function getLoanLimitForReader(reader = {}) {
-  const role = String(reader.role || reader.type || 'student').toLowerCase()
-  return role === 'teacher' ? Number(config.maxBooksTeacher || 35) : Number(config.maxBooksStudent || 2)
-}
-
-async function logAudit(action, details = {}, actorUid = null) {
-  if (!canUseFirebase || !db) return
-  try {
-    await addDoc(collection(db, 'audit_logs'), {
-      actorUid: actorUid || state.user?.uid || null,
-      action,
-      details: details || {},
-      timestamp: serverTimestamp()
-    })
-  } catch (err) {
-    console.warn('Não foi possível registrar auditoria:', err)
-  }
-}
-
-/* Book form: add / edit */
-async function addBook(event) {
-  event.preventDefault()
-  const button = $('#bookForm button[type="submit"]')
-  const editingId = $('#bookIdInput')?.value
-  const categoryId = $('#bookCategoryInput')?.value
-  const selectedCategory = getCategoryOptions().find((c) => c.id === categoryId || c.code === categoryId)
-  const title = $('#bookTitleInput')?.value.trim()
-  const author = $('#bookAuthorInput')?.value.trim()
-  const publisher = $('#bookPublisherInput')?.value.trim()
-  const existingBook = editingId ? state.books.find((item) => item.id === editingId) : null
-  const existingMeta = editingId ? { synopsis: existingBook?.synopsis || '', coverUrl: existingBook?.coverUrl || '' } : await lookupBookMetadata(title, author, publisher)
-  const book = {
-    title,
-    author,
-    publisher,
-    categoryId,
-    year: Number($('#bookYearInput')?.value || 2026),
-    shelf: $('#bookShelfInput')?.value.trim() || '',
-    total: Number($('#bookQuantityInput')?.value || 1),
-    tombamento: $('#bookTombamentoInput')?.value.trim() || '',
-    synopsis: existingMeta.synopsis,
-    coverUrl: existingMeta.coverUrl
-  }
-  const borrowedCopies = existingBook ? Number(existingBook.total || 0) - Number(existingBook.available || 0) : 0
-  if (!book.title || !book.author || !Number.isInteger(book.total) || book.total < 1 || book.total < borrowedCopies) return toast(book.total < borrowedCopies ? `A quantidade não pode ser menor que os ${borrowedCopies} exemplares emprestados.` : 'Preencha título, autor, categoria e quantidade válida.', 'error')
-
-  loading(button, true, 'Salvando…')
-
-  try {
-    if (editingId) {
-      const availableCopies = book.total - borrowedCopies
-      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory?.name || categoryId, schoolId: config.currentSchoolId, updatedAt: serverTimestamp() })
-      await logAudit('book_updated', { bookId: editingId, total: book.total }, state.user?.uid || null)
-      resetBookForm()
-      modal('bookFormModal', false)
-      toast('Livro atualizado com sucesso.')
-      return
-    }
-
-    const prefix = String(categoryId || 'GE').trim().toUpperCase()
-    const categoryName = selectedCategory?.name || prefix
-    const counterRef = doc(db, 'counters', `books_${prefix}`)
-    await runTransaction(db, async (tx) => {
-      const counterSnap = await tx.get(counterRef)
-      const lastCode = Number(counterSnap.exists() ? counterSnap.data().lastCode || 0 : 0)
-      const nextCodeNumber = lastCode + 1
-      const numberCode = normalizeBookCode(nextCodeNumber)
-      const code = `${prefix}-${numberCode}`
-      tx.set(counterRef, {
-        prefix,
-        lastCode: nextCodeNumber,
-        updatedAt: serverTimestamp()
-      }, { merge: true })
-      tx.set(doc(collection(db, 'books')), {
-        ...book,
-        code,
-        categoryId: prefix,
-        categoryName: categoryName,
-        schoolId: config.currentSchoolId,
-        available: book.total,
-        total: book.total,
-        status: 'disponivel',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
-    })
-    
-    await logAudit('book_created', { title: book.title, categoryId: book.categoryId, total: book.total }, state.user?.uid || null)
-    resetBookForm()
-    modal('bookFormModal', false)
-    toast('Livro cadastrado com sucesso.')
-  } catch (err) { error(err, 'Não foi possível salvar o livro.') } finally { loading(button, false) }
-}
-
-/* Categories */
-async function addCategory(event) {
-  event.preventDefault()
-  const button = $('#categoryForm button[type="submit"]')
-  const name = $('#categoryNameInput')?.value.trim()
-  const code = $('#categoryCodeInput')?.value.trim()
-  if (!name || !code) return toast('Informe nome e código da categoria.', 'error')
-  const normalizedCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
-  if (!normalizedCode) return toast('Código inválido para categoria.', 'error')
-  if (getCategoryOptions().some((category) => category.name.toLowerCase() === name.toLowerCase() || category.code?.toLowerCase() === normalizedCode.toLowerCase())) return toast('Essa categoria já existe.', 'error')
-  loading(button, true, 'Salvando…')
-  try {
-    const categoryRef = doc(db, 'categories', normalizedCode)
-    await setDoc(categoryRef, { id: normalizedCode, name, code: normalizedCode, schoolId: config.currentSchoolId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })
-    if ($('#categoryForm')) $('#categoryForm').reset(); 
-    renderCategorySelect(); 
-    renderCategoryList(); 
-    modal('categoryModal', false);
-    toast('Categoria salva com sucesso.')
-  } catch (err) { error(err, 'Não foi possível salvar a categoria.') } finally { loading(button, false) }
-}
-
-async function removeCategory(id) {
-  if (!confirm('Apagar esta categoria?')) return
-  try {
-    await deleteDoc(doc(db, 'categories', id))
-    toast('Categoria apagada.')
-  } catch (err) { error(err, 'Não foi possível apagar a categoria.') }
-}
-
-/* Readers */
-async function addReader(event) {
-  event.preventDefault()
-  const button = $('#readerForm button[type="submit"]')
-  const editingId = $('#readerIdInput')?.value
-  const type = $('#readerTypeInput')?.value || 'Aluno'
-  const role = type === 'Professor' ? 'teacher' : type === 'Responsável' ? 'guardian' : 'student'
-  const reader = {
-    schoolId: config.currentSchoolId,
-    name: $('#readerNameInput')?.value.trim(),
-    type,
-    role,
-    class: type === 'Aluno' ? $('#readerCourseInput')?.value.trim() : '',
-    course: type === 'Aluno' ? $('#readerCourseInput')?.value.trim() : '',
-    matricula: type === 'Aluno' ? $('#readerRegistrationInput')?.value.trim() : '',
-    cpf: type !== 'Aluno' ? $('#readerCpfInput')?.value.trim() : '',
-    email: $('#readerEmailInput')?.value.trim(),
-    phone: $('#readerPhoneInput')?.value.trim()
-  }
-  if (!reader.name || !reader.email || !reader.phone || (type === 'Aluno' && (!reader.course || !reader.matricula)) || (type !== 'Aluno' && !reader.cpf)) return toast('Preencha todos os campos obrigatórios.', 'error')
-  loading(button, true, editingId ? 'Atualizando…' : 'Salvando…')
-  try {
-    if (editingId) {
-      await updateDoc(doc(db, 'readers', editingId), { ...reader, updatedAt: serverTimestamp() })
-      resetReaderForm()
-      modal('readerFormModal', false)
-      toast('Leitor atualizado com sucesso.')
-    } else {
-      await addDoc(collection(db, 'readers'), { ...reader, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
-      resetReaderForm()
-      modal('readerFormModal', false)
-      toast('Leitor cadastrado com sucesso.')
-    }
-  } catch (err) { error(err, 'Não foi possível salvar o leitor.') } finally { loading(button, false) }
-}
-
-/* Remove book / reader */
-async function removeBook(id) {
-  if (state.loans.some((loan) => loan.bookId === id && loan.status === 'active')) return toast('Não é possível apagar um livro com empréstimo ativo.', 'error')
-  if (!confirm('Apagar este livro do acervo?')) return
-  try { await deleteDoc(doc(db, 'books', id)); toast('Livro apagado.') } catch (err) { error(err, 'Não foi possível apagar o livro.') }
-}
-
-async function removeReader(id) {
-  if (state.loans.some((loan) => loan.readerId === id && loan.status === 'active')) return toast('Não é possível apagar um leitor com empréstimo ativo.', 'error')
-  if (!confirm('Apagar este leitor?')) return
-  try { await deleteDoc(doc(db, 'readers', id)); toast('Leitor apagado.') } catch (err) { error(err, 'Não foi possível apagar o leitor.') }
-}
-
-/* Loans */
-async function registerLoan() {
-  const button = $('#registerLoanBtn')
-  const code = $('#bookCodeInput')?.value.trim().toUpperCase()
-  const text = $('#readerInput')?.value.trim()
-  const selectedReaderId = $('#readerSelectInput')?.value
-  const days = Number($('#loanDays')?.value || 7)
-  const book = state.books.find((b) => b.code?.toUpperCase() === code)
-  const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text?.toLowerCase())
-
-  if (!book || !reader) {
-    return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
-  }
-
-  const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
-  const loanLimit = getLoanLimitForReader(reader)
-
-  if (activeLoansForReader.length >= loanLimit) {
-    return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
-  }
-
-  const duplicateLoansSnap = await getDocs(query(
-    collection(db, 'loans'),
-    where('schoolId', '==', config.currentSchoolId),
-    where('readerId', '==', reader.id),
-    where('bookId', '==', book.id),
-    where('status', '==', 'active')
-  ))
-
-  if (!duplicateLoansSnap.empty) {
-    return toast('Este leitor já possui um empréstimo ativo para este mesmo livro!', 'error')
-  }
-
-  const role = String(reader.role || reader.type || 'student').toLowerCase()
-  loading(button, true, 'Registrando…')
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const bookRef = doc(db, 'books', book.id)
-      const bookSnap = await tx.get(bookRef)
-
-      if (!bookSnap.exists() || Number(bookSnap.data().available || 0) < 1) {
-        throw new Error('indisponível')
-      }
-
-      const availableCopies = Number(bookSnap.data().available || 0)
-      const due = new Date()
-      const effectiveDays = role === 'teacher' ? Number(config.teacherLoanDays || days || 21) : Number(days || 7)
-      due.setDate(due.getDate() + effectiveDays)
-
-      tx.update(bookRef, {
-        available: increment(-1),
-        status: availableCopies - 1 > 0 ? 'disponivel' : 'emprestado',
-        schoolId: bookSnap.data().schoolId || config.currentSchoolId,
-        updatedAt: serverTimestamp()
-      })
-
-      tx.set(doc(collection(db, 'loans')), {
-        schoolId: config.currentSchoolId,
-        bookId: book.id,
-        bookCode: book.code,
-        bookTitle: book.title,
-        readerId: reader.id,
-        readerName: reader.name,
-        readerCourse: reader.course || 'Não se aplica',
-        readerEmail: reader.email || '',
-        days: effectiveDays,
-        dueAt: Timestamp.fromDate(due),
-        status: 'active',
-        notices: {},
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
-    })
-
-    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
-    if ($('#bookCodeInput')) $('#bookCodeInput').value = ''
-    if ($('#readerInput')) $('#readerInput').value = ''
-    if ($('#readerSelectInput')) $('#readerSelectInput').value = ''
-    toast('Empréstimo registrado.')
-  } catch (err) {
-    if (err.message === 'indisponível') {
-      toast('Livro indisponível.', 'error')
-      return
-    }
-    error(err, 'Não foi possível registrar o empréstimo.')
-  } finally {
-    loading(button, false)
-  }
-}
-
-async function returnLoan(id) {
-  try {
-    await runTransaction(db, async (tx) => {
-      const loanRef = doc(db, 'loans', id)
-      const loanSnap = await tx.get(loanRef)
-      if (!loanSnap.exists() || loanSnap.data().status !== 'active') throw new Error('inválido')
-      const bookRef = doc(db, 'books', loanSnap.data().bookId)
-      const bookSnap = await tx.get(bookRef)
-
-      tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp(), schoolId: loanSnap.data().schoolId || config.currentSchoolId })
-
-      if (bookSnap.exists()) {
-        const free = Math.min(Number(bookSnap.data().available || 0) + 1, Number(bookSnap.data().total || 0))
-        tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp(), schoolId: bookSnap.data().schoolId || config.currentSchoolId })
-      }
-    })
-    await logAudit('loan_returned', { loanId: id }, state.user?.uid || null)
-    toast('Livro devolvido.')
-  } catch (err) {
-    error(err, 'Não foi possível registrar a devolução.')
-  }
-}
-
-async function renewLoan(id) {
-  const loan = state.loans.find((l) => l.id === id)
-  if (!loan) return
-  const select = document.querySelector?.(`[data-renew-days="${id}"]`)
-  const days = Number(select?.value || loan.days || 7)
-  try {
-    const due = date(loan.dueAt) ? new Date(date(loan.dueAt)) : new Date()
-    due.setDate(due.getDate() + days)
-    await updateDoc(doc(db, 'loans', id), { days, dueAt: Timestamp.fromDate(due), notices: {}, schoolId: config.currentSchoolId, updatedAt: serverTimestamp() })
-    await logAudit('loan_renewed', { loanId: id, days }, state.user?.uid || null)
-    toast(`Renovação concluída por ${days} dias.`)
-  } catch (err) { error(err, 'Não foi possível renovar o empréstimo.') }
-}
-
-/* Notifications */
-function normalizePhone(phone = '') {
-  return String(phone || '').replace(/\D/g, '')
-}
-
-function openWhatsAppMessage(reader, message) {
-  const phone = normalizePhone(reader?.phone)
-  if (!phone) return false
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
-  window.open(url, '_blank', 'noopener,noreferrer')
-  return true
-}
-
-async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
-  const email = String(recipient?.email || '').trim()
-  if (!email) {
-    toast('Endereço de e-mail não informado.', 'error')
-    return false
-  }
-
-  const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
-  const serviceId = config.emailjs.serviceId
-  const publicKey = config.emailjs.publicKey
-  const dueDate = loan ? formatDate(loan.dueAt) : '—'
-
-  let diasAtraso = 0
-  if (loan && loan.dueAt) {
-    const due = date(loan.dueAt)
-    const today = new Date()
-    if (due < today) {
-      const diffTime = Math.abs(today - due)
-      diasAtraso = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    }
-  }
-
-  if (!emailjsReady || !serviceId || !templateId || !publicKey) {
-    toast('Serviço do EmailJS não está configurado corretamente.', 'error')
-    return false
-  }
-
-  try {
-    window.emailjs.init({ publicKey })
-    await window.emailjs.send(serviceId, templateId, {
-      to_email: email,
-      to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso da Biblioteca',
-      message: message,
-      school_name: config.schoolName,
-      escola: config.schoolName,
-      organization: config.organizationName,
-      name: reader?.name || 'Leitor',
-      livro: loan?.bookTitle || '',
-      loan_days: Number(loan?.days || 0),
-      data_vencimento: dueDate,
-      date: dueDate,
-      dias_atraso: diasAtraso
-    })
-    return true
-  } catch (error) {
-    console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail..', 'error')
-    return false
-  }
-}
-
-async function triggerNotification(type) {
-  const notificationModal = $('#notificationModal')
-  const loanId = notificationModal?.dataset.loanId
-  const loan = state.loans.find((item) => item.id === loanId)
-  const reader = state.readers.find((item) => item.id === loan?.readerId)
-  const message = $('#notificationMessage')?.value.trim()
-
-  if (!loan || !reader || !message) {
-    return toast('Não foi possível enviar a notificação. Empréstimo ou leitor não encontrado.', 'error')
-  }
-
-  if (type === 'coordination') {
-    const coordEmail = (config.coordinationEmail || $('#coordinationEmailInput')?.value || '').trim()
-
-    if (!coordEmail) {
-      return toast('Cadastre e salve o e-mail da coordenação nas configurações da escola.', 'error')
-    }
-
-    const coordination = { 
-      name: 'Coordenação', 
-      email: coordEmail 
-    }
-
-    const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
-    const templateId = config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId
-
-    const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, templateId)
-
-    if (!sent) return
-    toast('Aviso enviado à coordenação com sucesso!')
-    modal('notificationModal', false)
-    return
-  }
-
-  if (type === 'whatsapp') {
-    const sent = openWhatsAppMessage(reader, message)
-    if (!sent) return toast('Este leitor não possui telefone cadastrado para WhatsApp.', 'error')
-
-    toast('WhatsApp aberto com a mensagem.')
-    modal('notificationModal', false)
-    return
-  }
-
-  if (!reader.email || !reader.email.trim()) {
-    return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
-  }
-
-  const sent = await sendEmailNotification(reader, message, loan, reader, config.emailjs.studentTemplateId)
-
-  if (!sent) return
-  toast('E-mail enviado ao leitor com sucesso!')
-  modal('notificationModal', false)
-}
-
-/* -------------------------
-   CSV import / export
-   ------------------------- */
-const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
-
-function exportCsv() { const rows = bookExportRows(); const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
-function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
-
-const normalizeCsvHeader = (value) => String(value ?? '').replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-const csvHeaderAliases = {
-  codigo: ['codigo', 'codigo do livro', 'codigo do acervo', 'id', 'id do livro', 'cod'],
-  titulo: ['titulo', 'titulo do livro', 'nome do livro', 'livro'],
-  autor: ['autor', 'nome do autor'],
-  editora: ['editora', 'publisher'],
-  categoria: ['categoria', 'genero', 'assunto'],
-  ano: ['ano', 'ano de publicacao', 'ano publicacao'],
-  localizacao: ['localizacao', 'estante', 'prateleira', 'local'],
-  disponiveis: ['disponiveis', 'quantidade disponivel', 'exemplares disponiveis'],
-  total: ['total', 'quantidade', 'quantidade total', 'quantidade de exemplares', 'exemplares'],
-  tombamento: ['tombamento', 'numero de tombamento', 'patrimonio']
-}
-
-function mapCsvColumns(headers) {
-  const columns = {}
-  headers.forEach((header, index) => {
-    const normalized = normalizeCsvHeader(header)
-    const field = Object.entries(csvHeaderAliases).find(([, aliases]) => aliases.includes(normalized))?.[0]
-    if (field && columns[field] === undefined) columns[field] = index
-  })
-  return columns
-}
-
-function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) ? number : null }
-
-async function importCsv(event) {
-  const input = event.target
-  const file = input?.files?.[0]
-  if (!file) return
-  modal('importCsvFileModal', false)
-  if (!canUseFirebase || !db || !state.user) { if (input) input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
-
-  try {
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: false })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) : []
-    if (rows.length < 2) return toast('O CSV está vazio ou não contém linhas de livros.', 'error')
-
-    const headerRowIndex = rows.findIndex((row) => {
-      const columns = mapCsvColumns(row)
-      return columns.codigo !== undefined && columns.titulo !== undefined
-    })
-    if (headerRowIndex < 0) {
-      const preview = rows.slice(0, 3).map((row) => row.filter(Boolean).join(', ')).filter(Boolean).join(' / ')
-      if (input) input.value = ''
-      return toast(`Não encontrei as colunas Código e Título. Cabeçalhos lidos: ${preview || 'nenhum'}.`, 'error')
-    }
-
-    const columns = mapCsvColumns(rows[headerRowIndex])
-    const required = ['codigo', 'titulo', 'autor', 'categoria', 'total']
-    const missing = required.filter((header) => columns[header] === undefined)
-    if (missing.length) {
-      const detected = rows[headerRowIndex].filter(Boolean).join(', ')
-      if (input) input.value = ''
-      return toast(`Colunas obrigatórias ausentes: ${missing.join(', ')}. Cabeçalhos lidos: ${detected}.`, 'error')
-    }
-
-    const categoriesByName = new Map()
-    getCategoryOptions().forEach((category) => {
-      categoriesByName.set(normalizeCsvHeader(category.name), category)
-      categoriesByName.set(normalizeCsvHeader(category.code || category.id), category)
-    })
-    const existingCodes = new Set(state.books.map((book) => String(book.code || '').trim().toUpperCase()))
-    const seenCodes = new Set()
-    const booksToImport = []
-    const countersToUpdate = new Map()
-    const skipped = []
-    const errors = []
-    const valueAt = (row, key) => columns[key] === undefined ? '' : String(row[columns[key]] ?? '').trim()
-
-    rows.slice(headerRowIndex + 1).forEach((row, index) => {
-      if (!row.some((value) => String(value ?? '').trim())) return
-      const line = headerRowIndex + index + 2
-      const code = valueAt(row, 'codigo').toUpperCase()
-      const codeParts = code.match(/^([A-Z0-9]{1,4})-(\d{4})$/)
-      const title = valueAt(row, 'titulo')
-      const author = valueAt(row, 'autor')
-      const categoryName = valueAt(row, 'categoria')
-      const category = categoriesByName.get(normalizeCsvHeader(categoryName))
-      const total = parseCsvInteger(valueAt(row, 'total'))
-      const availableValue = valueAt(row, 'disponiveis')
-      const available = availableValue ? parseCsvInteger(availableValue) : total
-      const yearValue = valueAt(row, 'ano')
-      const year = yearValue ? parseCsvInteger(yearValue) : 0
-
-      const rowErrors = []
-      if (!codeParts) rowErrors.push('código deve seguir PREFIXO-0001')
-      if (!title) rowErrors.push('título ausente')
-      if (!author) rowErrors.push('autor ausente')
-      if (!category) rowErrors.push(`categoria não cadastrada: ${categoryName || 'vazia'}`)
-      if (total === null || total < 1) rowErrors.push('total inválido')
-      if (available === null || available > total) rowErrors.push('disponíveis deve estar entre 0 e o total')
-      if (year === null) rowErrors.push('ano inválido')
-      if (codeParts && category && codeParts[1] !== String(category.code || category.id).toUpperCase()) rowErrors.push('prefixo do código não corresponde à categoria')
-      if (rowErrors.length) {
-        errors.push(`linha ${line} (${rowErrors.join(', ')})`)
-        return
-      }
-      if (seenCodes.has(code)) {
-        errors.push(`linha ${line} (código repetido no arquivo: ${code})`)
-        return
-      }
-      seenCodes.add(code)
-      if (existingCodes.has(code)) {
-        skipped.push(code)
-        return
-      }
-
-      booksToImport.push({
-        code,
-        title,
-        author,
-        publisher: valueAt(row, 'editora'),
-        categoryId: String(category.code || category.id),
-        categoryName: category.name,
-        year,
-        shelf: valueAt(row, 'localizacao'),
-        available,
-        total,
-        tombamento: valueAt(row, 'tombamento'),
-        status: available > 0 ? 'disponivel' : 'emprestado',
-        schoolId: config.currentSchoolId
-      })
-      const [prefix, codeNumber] = [codeParts[1], Number(codeParts[2])]
-      countersToUpdate.set(prefix, Math.max(countersToUpdate.get(prefix) || 0, codeNumber))
-    })
-
-    if (errors.length) { if (input) input.value = ''; return toast(`Corrija as linhas inválidas: ${errors.slice(0, 4).join('; ')}${errors.length > 4 ? '; …' : ''}. Nada foi importado.`, 'error') }
-    if (!booksToImport.length) { if (input) input.value = ''; return toast(skipped.length ? `Nenhum livro novo. ${skipped.length} código(s) já existiam no acervo.` : 'Nenhum livro válido para importar.', 'error') }
-    pendingCsvImport = { books: booksToImport, counters: countersToUpdate, skippedCount: skipped.length }
-    if ($('#importCsvSummary')) $('#importCsvSummary').textContent = `Importar ${booksToImport.length} livro(s)? Códigos já existentes serão ignorados.`
-    modal('importCsvConfirmModal', true)
-  } catch (err) {
-    error(err, 'Não foi possível ler ou validar o CSV.')
-  } finally {
-    if (input) input.value = ''
-  }
-}
-
-async function confirmCsvImport() {
-  const pending = pendingCsvImport
-  if (!pending || !state.user || !canUseFirebase || !db) return
-  const button = $('#confirmCsvImportBtn')
-  loading(button, true, 'Importando…')
-
-  try {
-    for (const [prefix, importedLastCode] of pending.counters) {
-      const counterRef = doc(db, 'counters', `books_${prefix}`)
-      await runTransaction(db, async (transaction) => {
-        const counter = await transaction.get(counterRef)
-        const lastCode = Number(counter.exists() ? counter.data().lastCode || 0 : 0)
-        if (importedLastCode > lastCode) transaction.set(counterRef, { prefix, lastCode: importedLastCode, updatedAt: serverTimestamp() }, { merge: true })
-      })
-    }
-
-    for (let offset = 0; offset < pending.books.length; offset += 450) {
-      const batch = writeBatch(db)
-      pending.books.slice(offset, offset + 450).forEach((book) => {
-        batch.set(doc(collection(db, 'books')), { ...book, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
-      })
-      await batch.commit()
-    }
-
-    await logAudit('books_imported', { count: pending.books.length }, state.user.uid)
-    toast(`${pending.books.length} livro(s) importado(s). ${pending.skippedCount} código(s) já existente(s) ignorado(s).`)
-    pendingCsvImport = null
-    modal('importCsvConfirmModal', false)
-  } catch (err) {
-    error(err, 'Não foi possível importar o CSV.')
-  } finally {
-    loading(button, false)
-  }
-}
-
-/* -------------------------
-   Subscriptions (admin-only)
-   ------------------------- */
-function clearAdminSubscriptions() { while (state.adminUnsubs.length) try { state.adminUnsubs.pop()() } catch (e) { console.warn('erro ao limpar subscription:', e) } }
-
-function subscribeAdmin() {
-  if (!canUseFirebase || !db) return
-  clearAdminSubscriptions()
-  const activeSchoolId = config.currentSchoolId
-
-  // Books (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.books = snap.docs.map((d) => {
-      const data = d.data()
-      const total = Number(data.total || 0)
-      const available = Number(data.available ?? total)
-      return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
-    })
-    renderBooks(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Categories (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.categories = snap.docs.map((d) => ({ id: d.data().id || d.id, ...d.data() }))
-    renderCategorySelect(); renderCategoryList(); renderBooks(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Readers (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    renderReaders(); renderDashboard()
-  }, (err) => error(err)))
-
-  // Loans (filtered by schoolId)
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => {
-    state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    renderLoans(); renderDashboard()
-  }, (err) => error(err)))
-}
-
-/* -------------------------
-   Forms / modals helpers
-   ------------------------- */
-function resetBookForm() { 
-  const form = $('#bookForm')
-  if (form) form.reset()
-  if ($('#bookIdInput')) $('#bookIdInput').value = ''
-  const titleHeader = $('#bookModalTitle')
-  if (titleHeader) titleHeader.textContent = 'Cadastrar livro'
-  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Salvar livro'
-  renderCategorySelect()
-  if ($('#bookYearInput')) $('#bookYearInput').value = new Date().getFullYear()
-  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = 1
-}
-
-function resetReaderForm() { 
-  const form = $('#readerForm')
-  if (form) form.reset()
-  if ($('#readerIdInput')) $('#readerIdInput').value = ''
-  const titleHeader = $('#readerModalTitle')
-  if (titleHeader) titleHeader.textContent = 'Cadastrar leitor'
-  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Salvar leitor'
-  updateReaderFields()
-}
-
-function editBook(id) { 
-  const book = state.books.find((item) => item.id === id)
-  if (!book) return
-  if ($('#bookIdInput')) $('#bookIdInput').value = id
-  if ($('#bookTitleInput')) $('#bookTitleInput').value = book.title || ''
-  if ($('#bookAuthorInput')) $('#bookAuthorInput').value = book.author || ''
-  if ($('#bookPublisherInput')) $('#bookPublisherInput').value = book.publisher || ''
-  if ($('#bookCategoryInput')) $('#bookCategoryInput').value = book.categoryId || ''
-  if ($('#bookYearInput')) $('#bookYearInput').value = book.year || ''
-  if ($('#bookShelfInput')) $('#bookShelfInput').value = book.shelf || ''
-  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = Number(book.total || 1)
-  if ($('#bookTombamentoInput')) $('#bookTombamentoInput').value = book.tombamento || ''
-  
-  const titleHeader = $('#bookModalTitle')
-  if (titleHeader) titleHeader.textContent = 'Editar livro'
-  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Atualizar livro'
-  modal('bookFormModal', true)
-}
-
-function editReader(id) { 
-  const reader = state.readers.find((item) => item.id === id)
-  if (!reader) return
-  if ($('#readerIdInput')) $('#readerIdInput').value = id
-  if ($('#readerNameInput')) $('#readerNameInput').value = reader.name || ''
-  if ($('#readerTypeInput')) $('#readerTypeInput').value = reader.type || 'Aluno'
-  if ($('#readerCourseInput')) $('#readerCourseInput').value = reader.course || ''
-  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').value = reader.matricula || ''
-  if ($('#readerCpfInput')) $('#readerCpfInput').value = reader.cpf || ''
-  if ($('#readerEmailInput')) $('#readerEmailInput').value = reader.email || ''
-  if ($('#readerPhoneInput')) $('#readerPhoneInput').value = reader.phone || ''
-  
-  const titleHeader = $('#readerModalTitle')
-  if (titleHeader) titleHeader.textContent = 'Editar leitor'
-  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Atualizar leitor'
-  updateReaderFields()
-  modal('readerFormModal', true)
-}
-
-function updateReaderFields() { 
-  const typeSelect = $('#readerTypeInput')
-  if (!typeSelect) return
-  const student = typeSelect.value === 'Aluno'
-  ;[['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => {
-    const f = $(s)
-    if (f) {
-      f.hidden = !visible
-      f.classList.toggle('hidden', !visible)
-    }
-  })
-  if ($('#readerCourseInput')) $('#readerCourseInput').required = student
-  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').required = student
-  if ($('#readerCpfInput')) $('#readerCpfInput').required = !student
-}
-
-/* Loans rendering */
-function renderLoans() {
-  const tbody = $('#loansTableBody')
-  if (!tbody) return
-
-  const list = state.loans.filter((l) => {
-    if (l.status !== 'active') return false
-
-    const reader = state.readers.find((r) => r.id === l.readerId)
-    const role = String(reader?.role || reader?.type || '').toLowerCase()
-
-    if (state.loanFilter === 'student') return role === 'student' || role === 'aluno'
-    if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
-    if (state.loanFilter === 'overdue') return overdue(l)
-    
-    return true
-  })
-
-  tbody.innerHTML = list.length ? list.map((l) => {
-    const selectedDays = Number(l.days || 7)
-    const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
-    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
-  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
-
-  $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return))
-  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew))
-  $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify))
-
-  const filterSelect = $('#loanFilterSelect')
-  if (filterSelect) {
-    filterSelect.value = state.loanFilter || 'all'
-    filterSelect.onchange = (evt) => {
-      state.loanFilter = evt.target.value
-      renderLoans()
-    }
-  }
-}
-
-/* Notification helper used in table actions */
-function notify(id) {
-  const loan = state.loans.find((l) => l.id === id)
-  const reader = state.readers.find((r) => r.id === loan?.readerId)
-  if (!loan) return
-  if ($('#notificationContact')) $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`
-  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`
-  const modalEl = $('#notificationModal')
-  if (modalEl) modalEl.dataset.loanId = String(id)
-  modal('notificationModal', true)
-}
-
-/* -------------------------
-   QR scanner
-   ------------------------- */
-let qrScannerStream = null
-let qrScanFrame = null
-
-function stopQrScanner() {
-  if (qrScanFrame) cancelAnimationFrame(qrScanFrame)
-  qrScanFrame = null
-  qrScannerStream?.getTracks().forEach((track) => track.stop())
-  qrScannerStream = null
-  const video = $('#qrScannerVideo')
-  if (video) {
-    video.pause()
-    video.srcObject = null
-  }
-}
-
-async function startQrScanner() {
-  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return toast('Seu navegador não oferece leitura de QR code. Digite o ID do livro.', 'error')
-  const video = $('#qrScannerVideo')
-  const status = $('#qrScannerStatus')
-  modal('qrScannerModal', true)
-  try {
-    qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-    if (video) video.srcObject = qrScannerStream
-    if (video) await video.play()
-    if (status) status.textContent = 'Aponte a câmera para o código do livro.'
-    const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
-    const scan = async () => {
-      if (!qrScannerStream) return
-      try {
-        const codes = await detector.detect(video)
-        const code = codes.find((item) => item.rawValue)?.rawValue
-        if (code) {
-          if ($('#bookCodeInput')) $('#bookCodeInput').value = code.trim().toUpperCase()
-          stopQrScanner()
-          modal('qrScannerModal', false)
-          toast('ID do livro preenchido pelo QR code.')
-          return
-        }
-      } catch (err) {
-        console.warn('Não foi possível ler o QR code:', err)
-      }
-      qrScanFrame = requestAnimationFrame(scan)
-    }
-    scan()
-  } catch (err) {
-    stopQrScanner()
-    modal('qrScannerModal', false)
-    toast(err?.name === 'NotAllowedError' ? 'Permita o acesso à câmera para escanear o livro.' : 'Não foi possível abrir a câmera.', 'error')
-  }
-}
-
-/* -------------------------
-   Form wiring and setup
-   ------------------------- */
-function setup() {
-  // Tabs
-  $$('.tab-btn').forEach((b) => b.onclick = () => {
-    $$('.tab-btn').forEach((tb) => tb.classList.toggle('is-active', tb === b))
-    $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === b.dataset.tab))
-  })
-
-  if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }
-  if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
-  if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : '' }
-
-  if ($('#bookForm')) $('#bookForm').onsubmit = addBook
-  if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory
-  if ($('#readerForm')) $('#readerForm').onsubmit = addReader
-  if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
-  if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
-  if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
-  if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner
-
-  if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true) }
-  if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true) }
-  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true) }
-
-  if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false)
-  if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false)
-  if ($('#exportBtn')) $('#exportBtn').onclick = exportCsv
-  if ($('#exportXlsxBtn')) $('#exportXlsxBtn').onclick = exportXlsx
-
-  $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) })
-
-  if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }
-  if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp')
-  if ($('#sendEmailBtn')) $('#sendEmailBtn').onclick = () => triggerNotification('email')
-  if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
-
-  if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
-    // CLEAR subscriptions immediately to avoid orphan listeners
-    try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed before signOut:', e) }
-    if (!canUseFirebase || !auth) {
-      state.user = null
-      if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
-      toast('Sessão local encerrada.')
-      return
-    }
-    try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
-  }
-}
-
-/* -------------------------
-   School settings
-   ------------------------- */
-async function saveSchoolSettings(event) {
-  event.preventDefault()
-  if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
-
-  const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
-  const reminderDays = Number($('#reminderDaysInput')?.value || 1)
-  const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
-
-  const maxBooksStudent = Number($('#maxBooksStudentInput')?.value || config.maxBooksStudent || 2)
-  const maxBooksTeacher = Number($('#maxBooksTeacherInput')?.value || config.maxBooksTeacher || 35)
-  const teacherLoanDays = Number($('#teacherLoanDaysInput')?.value || config.teacherLoanDays || 21)
-
-  try {
-    const schoolRef = doc(db, 'schools', config.currentSchoolId)
-    await setDoc(schoolRef, {
-      coordinationEmail,
-      reminderDays,
-      coordinationDays,
-      maxBooksStudent,
-      maxBooksTeacher,
-      teacherLoanDays,
-      updatedAt: serverTimestamp()
-    }, { merge: true })
-
-    config.coordinationEmail = coordinationEmail
-    config.reminderDays = reminderDays
-    config.coordinationDays = coordinationDays
-    config.maxBooksStudent = maxBooksStudent
-    config.maxBooksTeacher = maxBooksTeacher
-    config.teacherLoanDays = teacherLoanDays
-    syncSchoolSettingsForm(config)
-    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
-    toast('Configurações salvas com sucesso.')
-  } catch (err) {
-    error(err, 'Não foi possível salvar as configurações da escola.')
-  }
-}
-
-function syncSchoolSettingsForm(data = config) {
-  const coordinationEmailInput = $('#coordinationEmailInput')
-  const reminderDaysInput = $('#reminderDaysInput')
-  const coordinationDaysInput = $('#coordinationDaysInput')
-  const maxBooksStudentInput = $('#maxBooksStudentInput')
-  const maxBooksTeacherInput = $('#maxBooksTeacherInput')
-  const teacherLoanDaysInput = $('#teacherLoanDaysInput')
-  const settings = data || {}
-
-  if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
-  if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
-  if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
-  if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
-  if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
-  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
-}
-
-/* Ensure current school data present */
-async function ensureCurrentSchoolId() {
-  if (!canUseFirebase || !db) return
-
-  try {
-    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (schoolDoc.exists()) {
-      const data = schoolDoc.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      syncSchoolSettingsForm()
-      return
-    }
-
-    const schoolsSnap = await getDocs(collection(db, 'schools'))
-    if (!schoolsSnap.empty) {
-      const firstSchool = schoolsSnap.docs[0]
-      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
-      config.currentSchoolId = firstSchoolId
-      const data = firstSchool.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-    } else {
-      config.currentSchoolId = 'escola-padrao'
-      config.schoolName = 'Biblioteca escolar'
-      config.coordinationEmail = ''
-      config.reminderDays = 1
-      config.coordinationDays = 7
-      config.maxBooksStudent = 2
-      config.maxBooksTeacher = 35
-      config.teacherLoanDays = 21
-    }
-    syncSchoolSettingsForm()
-  } catch (err) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
-    config.coordinationEmail = ''
-    config.reminderDays = 1
-    config.coordinationDays = 7
-    config.maxBooksStudent = 2
-    config.maxBooksTeacher = 35
-    config.teacherLoanDays = 21
-    syncSchoolSettingsForm()
-  }
-}
-
-/* Resolve user profile and its school */
-async function loadSchoolData(schoolId = config.currentSchoolId) {
-  if (!canUseFirebase || !db) return
-
-  try {
-    config.currentSchoolId = schoolId || config.currentSchoolId
-    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (school.exists()) {
-      const data = school.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-    }
-    const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
-    syncSchoolSettingsForm()
-  } catch (err) {
-    error(err, 'Não foi possível carregar a escola vinculada ao login.')
-  }
-}
-
-async function resolveUserSchool(user) {
-  if (!canUseFirebase || !db || !user) {
-    await ensureCurrentSchoolId()
-    const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
-    return
-  }
-
-  try {
-    const userDoc = await getDoc(doc(db, 'users', user.uid))
-    const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
-    await loadSchoolData(schoolId)
-    await ensureCurrentSchoolId()
-    return userDoc.exists() ? userDoc.data() : null
-  } catch (err) {
-    error(err, 'Não foi possível recuperar a escola deste usuário.')
-    return null
-  }
-}
-
-/* -------------------------
-   Initialization
-   ------------------------- */
-function hydrateFallbackData() {
-  state.categories = [...defaultCategories]
-  state.books = fallbackBooks.map((book) => {
-    const total = Number(book.total || 0)
-    const available = Number(book.available ?? total)
-    return { ...book, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
-  })
-  state.readers = fallbackReaders
-  state.loans = fallbackLoans.map((loan) => ({ ...loan, dueAt: loan.dueAt instanceof Date ? loan.dueAt : new Date(loan.dueAt), status: loan.status || 'active' }))
-  renderCategorySelect()
-  renderCategoryList()
-  renderBooks()
-  renderReaders()
-  renderLoans()
-  renderDashboard()
-}
-
-setup()
-syncSchoolSettingsForm()
-
-if ($('#importCsvBtn')) $('#importCsvBtn').onclick = () => modal('importCsvFileModal', true)
-if ($('#importCsvInput')) $('#importCsvInput').onchange = importCsv
-const cancelCsvFileSelection = () => { if ($('#importCsvInput')) $('#importCsvInput').value = ''; modal('importCsvFileModal', false) }
-if ($('#cancelCsvFileBtn')) $('#cancelCsvFileBtn').onclick = cancelCsvFileSelection
-if ($('#closeCsvFileModalBtn')) $('#closeCsvFileModalBtn').onclick = cancelCsvFileSelection
-const cancelCsvImport = () => { pendingCsvImport = null; modal('importCsvConfirmModal', false) }
-if ($('#cancelCsvImportBtn')) $('#cancelCsvImportBtn').onclick = cancelCsvImport
-if ($('#closeCsvImportBtn')) $('#closeCsvImportBtn').onclick = cancelCsvImport
-if ($('#confirmCsvImportBtn')) $('#confirmCsvImportBtn').onclick = confirmCsvImport
-
-if ($('#loginForm')) {
-  $('#loginForm').onsubmit = async (x) => {
-    x.preventDefault();
-    const email = $('#loginForm input[type="email"]')?.value.trim();
-    const password = $('#loginForm input[type="password"]')?.value;
-    const b = $('#loginForm button[type="submit"]');
-    loading(b, true, 'Entrando…');
-
-    if (!canUseFirebase || !auth) {
-      toast('Firebase Auth indisponível. Verifique a configuração do projeto.', 'error');
-      loading(b, false);
-      return
-    }
-
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-      modal('loginModal', false)
-    } catch (err) {
-      error(err)
-    } finally {
-      loading(b, false)
-    }
-  };
-}
-
-if ($('#resetPasswordBtn')) {
-  $('#resetPasswordBtn').onclick = async () => { 
-    const email = $('#loginForm input[type="email"]')?.value.trim(); 
-    if (!email) return toast('Informe seu e-mail.', 'error'); 
-    if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa.', 'error'); 
-    try { 
-      await sendPasswordResetEmail(auth, email); 
-      toast('Se este e-mail pertencer a um administrador cadastrado, o link de recuperação foi enviado.') 
-    } catch (err) { 
-      error(err, 'Não foi possível enviar a recuperação.') 
-    } 
-  }
-}
-
-async function init() {
-  updateReaderFields()
-  renderCategorySelect()
-  renderCategoryList()
-  renderBooks()
-  renderReaders()
-  renderLoans()
-  renderDashboard()
-
-  if (!canUseFirebase || !db) {
-    hydrateFallbackData()
-    state.user = null
-    if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
-    return
-  }
-
-  try {
-    await ensureCurrentSchoolId()
-    renderCategorySelect()
-    renderCategoryList()
-    renderBooks()
-    renderReaders()
-    renderLoans()
-    renderDashboard()
-
-    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (school.exists()) {
-      const data = school.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      syncSchoolSettingsForm()
-    }
-    if ($('#schoolName')) $('#schoolName').textContent = config.schoolName
-  } catch (err) { error(err) }
-
-  onAuthStateChanged(auth, async (user) => {
-    state.user = user
-    if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user)
-    if (user) {
-      const schoolBeforeProfile = config.currentSchoolId
-      state.profile = await resolveUserSchool(user)
-      if (state.profile?.role !== 'admin') {
-        // Immediate cleanup before forcing sign out to avoid orphan listeners
-        try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed:', e) }
-        state.profile = null
-        state.user = null
-        toast('Esta conta não possui acesso administrativo.', 'error')
-        try { await signOut(auth) } catch (e) { /* ignore */ }
-        return
-      }
-      if (schoolBeforeProfile !== config.currentSchoolId) {
-        // If school changed as part of profile resolution, refresh admin subscriptions bound to new school
-        subscribeAdmin()
-      } else {
-        subscribeAdmin()
-      }
-    } else {
-      // user logged out -> clear admin subscriptions and reset admin state
-      clearAdminSubscriptions()
-      state.profile = null
-      state.readers = []
-      state.loans = []
-      state.books = []
-      state.categories = []
-      renderReaders()
-      renderLoans()
-      renderBooks()
-      renderCategoryList()
-      renderDashboard()
-    }
-  })
-}
-
-init()
+    </div>
+
+    <div class="modal hidden" id="loginModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="loginModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="loginModal">×</button>
+        <div class="login-header">
+          <div class="brand-mark accent">📚</div>
+          <h3>Acesso administrativo</h3>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>E-mail</span>
+            <input type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>Senha</span>
+            <input type="password" autocomplete="current-password" required />
+          </label>
+          <button class="btn btn-primary" type="submit">Entrar no painel</button>
+          <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="importCsvFileModal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="importCsvFileTitle">
+        <button class="modal-close" id="closeCsvFileModalBtn" type="button" aria-label="Fechar seleção de arquivo">×</button>
+        <h3 id="importCsvFileTitle">Importar livros do acervo</h3>
+        <label>
+          <span>Arquivo CSV</span>
+          <input id="importCsvInput" type="file" accept=".csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </label>
+        <div class="action-row">
+          <button class="btn btn-secondary" id="cancelCsvFileBtn" type="button">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="importCsvConfirmModal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="importCsvConfirmTitle">
+        <button class="modal-close" id="closeCsvImportBtn" type="button" aria-label="Cancelar importação">×</button>
+        <h3 id="importCsvConfirmTitle">Confirmar importação</h3>
+        <p id="importCsvSummary"></p>
+        <div class="action-row">
+          <button class="btn btn-secondary" id="cancelCsvImportBtn" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="confirmCsvImportBtn" type="button">Importar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="notificationModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="notificationModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="notificationModal">×</button>
+        <h3>Notificar leitor</h3>
+        <p id="notificationContact"></p>
+        <label><span>Mensagem sugerida</span><textarea id="notificationMessage" rows="5"></textarea></label>
+        <div style="display:flex; flex-wrap:wrap; gap:0.65rem; margin-top:0.8rem;">
+          <button class="btn btn-primary" type="button" id="copyNotificationBtn">Copiar mensagem</button>
+          <button class="btn btn-ghost" type="button" id="sendWhatsappBtn">Enviar por WhatsApp</button>
+          <button class="btn btn-secondary" type="button" id="sendEmailBtn">Enviar por e-mail</button>
+          <button class="btn btn-secondary" type="button" id="sendCoordinationBtn">Avisar coordenação</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="qrScannerModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="qrScannerModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="qrScannerModal">×</button>
+        <h3>Escanear QR code</h3>
+        <p>Aponte a câmera para o código do livro.</p>
+        <video id="qrScannerVideo" class="qr-scanner-video" autoplay muted playsinline></video>
+        <p id="qrScannerStatus" class="empty-state">Iniciando câmera…</p>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="bookFormModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="bookFormModal"></div>
+      <div class="modal-card">
+        <button class="modal-close" type="button" data-close="bookFormModal">×</button>
+        <div class="login-header mb-4">
+          <h3 id="bookModalTitle">Cadastrar livro</h3>
+        </div>
+        <form id="bookForm" class="form-grid">
+          <label>
+            <span>Título</span>
+            <input id="bookTitleInput" type="text" placeholder="Ex: A Revolução dos Bichos" required />
+          </label>
+          <label>
+            <span>Autor</span>
+            <input id="bookAuthorInput" type="text" placeholder="Ex: George Orwell" required />
+          </label>
+          <label>
+            <span>Editora</span>
+            <input id="bookPublisherInput" type="text" placeholder="Ex: Companhia das Letras" />
+          </label>
+          <label>
+            <span>Categoria</span>
+            <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
+          </label>
+          <label>
+            <span>Ano</span>
+            <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
+          </label>
+          <label>
+            <span>Localização</span>
+            <input id="bookShelfInput" type="text" placeholder="Ex: Estante 3 · Prateleira A" />
+          </label>
+          <label>
+            <span>Quantidade de exemplares</span>
+            <input id="bookQuantityInput" type="number" min="1" value="1" required />
+          </label>
+          <label>
+            <span>Número de tombamento</span>
+            <input id="bookTombamentoInput" type="text" />
+          </label>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem; grid-column: 1 / -1; margin-top: 1rem;">
+            <input id="bookIdInput" type="hidden" />
+            <button class="btn btn-secondary" id="cancelBookEditBtn" type="button" data-close="bookFormModal">Cancelar</button>
+            <button class="btn btn-primary" id="saveBookBtn" type="submit">Salvar livro</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="readerFormModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="readerFormModal"></div>
+      <div class="modal-card">
+        <button class="modal-close" type="button" data-close="readerFormModal">×</button>
+        <div class="login-header mb-4">
+          <h3 id="readerModalTitle">Cadastrar leitor</h3>
+        </div>
+        <form id="readerForm" class="form-grid">
+          <label>
+            <span>Nome completo</span>
+            <input id="readerNameInput" type="text" placeholder="Ex: Ana Souza" required />
+          </label>
+          <label>
+            <span>Tipo</span>
+            <select id="readerTypeInput">
+              <option value="Aluno">Aluno</option>
+              <option value="Professor">Professor</option>
+              <option value="Outros">Outros</option>
+            </select>
+          </label>
+          <label id="readerCourseField">
+            <span>Curso / Turma</span>
+            <input id="readerCourseInput" type="text" placeholder="Ex: Informática · 2026" required />
+          </label>
+          <label id="readerRegistrationField">
+            <span>Matrícula</span>
+            <input id="readerRegistrationInput" type="text" placeholder="Ex: 202600123" required />
+          </label>
+          <label id="readerCpfField" class="hidden">
+            <span>CPF</span>
+            <input id="readerCpfInput" type="text" inputmode="numeric" placeholder="Ex: 000.000.000-00" />
+          </label>
+          <label>
+            <span>E-mail</span>
+            <input id="readerEmailInput" type="email" placeholder="Ex: ana@escola.edu.br" required />
+          </label>
+          <label>
+            <span>Telefone</span>
+            <input id="readerPhoneInput" type="tel" placeholder="Ex: (88) 99999-9999" required />
+          </label>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem; grid-column: 1 / -1; margin-top: 1rem;">
+            <input id="readerIdInput" type="hidden" />
+            <button class="btn btn-secondary" id="cancelReaderEditBtn" type="button" data-close="readerFormModal">Cancelar</button>
+            <button class="btn btn-primary" id="saveReaderBtn" type="submit">Salvar leitor</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="categoryModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="categoryModal"></div>
+      <div class="modal-card small">
+        <button class="modal-close" type="button" data-close="categoryModal">×</button>
+        <div class="login-header mb-4">
+          <h3>Cadastrar Categoria</h3>
+        </div>
+        <form id="categoryForm" class="login-form">
+          <label>
+            <span>Nome da categoria</span>
+            <input id="categoryNameInput" type="text" placeholder="Ex: Ficção científica" required />
+          </label>
+          <label>
+            <span>Código</span>
+            <input id="categoryCodeInput" type="text" placeholder="Ex: FC" maxlength="4" required />
+          </label>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top: 1rem;">
+            <button class="btn btn-secondary" type="button" data-close="categoryModal">Cancelar</button>
+            <button class="btn btn-primary" type="submit">Salvar categoria</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script type="module" src="script.js"></script>
+  </body>
+</html>
