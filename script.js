@@ -333,7 +333,7 @@ function renderLoans() {
     if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
     if (state.loanFilter === 'overdue') return overdue(l)
     
-    return true // 'all'
+    return true
   })
 
   e.loans.innerHTML = list.length ? list.map((l) => {
@@ -355,7 +355,7 @@ function renderLoans() {
     }
   }
 }
-
+  
 function renderBooks() { 
   if (!e.books) return;
   const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); 
