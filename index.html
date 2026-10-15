@@ -165,11 +165,9 @@
                 <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
               </div>
 
-              <div class="mt-24 panel">
+             <div class="mt-24 panel">
   <div class="panel-head flex-between align-center mb-3">
     <h3>Empréstimos ativos</h3>
-
-    <!-- Caixa de Seleção do Filtro -->
     <div class="filter-select-wrap">
       <select id="loanFilterSelect" class="input-select">
         <option value="all">Todos os empréstimos</option>
@@ -179,6 +177,22 @@
       </select>
     </div>
   </div>
+
+  <div class="table-wrap table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>Livro</th>
+          <th>Leitor</th>
+          <th>Vencimento</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="loansTableBody"></tbody>
+    </table>
+  </div>
+</div>
 
   <div class="table-wrap table-responsive">
 
