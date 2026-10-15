@@ -189,7 +189,20 @@ const overdue = (l) => l.status === 'active' && date(l.dueAt) < new Date()
 function toast(message, type = 'success') { if (!e.toast) return; e.toast.textContent = message; e.toast.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { e.toast.className = 'toast hidden' }, 4000) }
 function error(err, message = 'Não foi possível conectar ao servidor. Verifique sua conexão.') { console.error(err); toast(err?.code === 'auth/invalid-credential' ? 'E-mail ou senha inválidos.' : message, 'error') }
 function loading(button, value, text = 'Aguarde…') { if (!button) return; button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
-function modal(id, open) { const el = document.getElementById(id); if (el) { el.classList.toggle('hidden', !open); el.setAttribute('aria-hidden', String(!open)) } }
+
+// Correção aplicada: retira o foco de elementos internos ao fechar o modal para evitar o aviso de aria-hidden do navegador
+function modal(id, open) { 
+  const el = document.getElementById(id); 
+  if (el) { 
+    if (!open) {
+      const activeElement = el.querySelector(':focus');
+      if (activeElement) activeElement.blur();
+    }
+    el.classList.toggle('hidden', !open); 
+    el.setAttribute('aria-hidden', String(!open)); 
+  } 
+}
+
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
 
 function normalizeBookCode(value) {
@@ -277,22 +290,23 @@ function renderDashboard() {
     `).join('');
 
     $$('.clickable-kpi').forEach((card) => {
-  card.onclick = () => {
-    const targetTab = card.dataset.targetTab;
-    if (targetTab) {
-      const cardTitle = card.querySelector('span')?.textContent;
-      
-      if (cardTitle === 'Livros em Atraso') {
-        state.loanFilter = 'overdue';
-      } else if (cardTitle === 'Empréstimos Ativos') {
-        state.loanFilter = 'all';
-      }
+      card.onclick = () => {
+        const targetTab = card.dataset.targetTab;
+        if (targetTab) {
+          const cardTitle = card.querySelector('span')?.textContent;
+          
+          if (cardTitle === 'Livros em Atraso') {
+            state.loanFilter = 'overdue';
+          } else if (cardTitle === 'Empréstimos Ativos') {
+            state.loanFilter = 'all';
+          }
 
-      tab(targetTab);    
-      renderLoans();    
-    }
-  };
-});
+          tab(targetTab);    
+          renderLoans();    
+        }
+      };
+    });
+  } // <--- CHAVE DE FECHAMENTO CORRIGIDA AQUI (ESTAVA FALTANDO E CAUSANDO O ERRO DE SINTAXE)
 
   renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); 
   const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; 
@@ -302,6 +316,7 @@ function renderDashboard() {
   const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5); 
   if (e.topReaders) e.topReaders.innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>' 
 }
+
 function hydrateFallbackData() {
   state.categories = [...defaultCategories]
   state.books = fallbackBooks.map((book) => {
@@ -1154,13 +1169,14 @@ async function saveSchoolSettings(event) {
 }
 
 function setup() { 
-  $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); 
-  $$('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); 
+  $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$
+('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); 
   if ($('#searchInput')) $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; 
   if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; 
   if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; 
   if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; 
-  $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); 
+  $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$
+('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); 
   
   if ($('#bookForm')) $('#bookForm').onsubmit = addBook; 
   if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory; 
@@ -1170,7 +1186,6 @@ function setup() {
   if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan; 
   if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner; 
   
-  // Abertura de Modais de Cadastro
   if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true); };
   if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true); };
   if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true); };
