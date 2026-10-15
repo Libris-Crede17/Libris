@@ -7,17 +7,8 @@ Sistema escolar de biblioteca da CREDE, feito com HTML, CSS, JavaScript puro, Fi
 1. No Firebase Console do projeto `librisce`, ative **Authentication > Email/Password**.
 2. Crie o usuário administrativo em Authentication e anote o UID.
 3. Crie manualmente `users/{UID}` no Firestore. O perfil deve conter `role: "admin"` e o `schoolId` correto; o cliente não pode criar ou alterar perfis.
-4. Crie o documento `schools/escola-padrao` com, pelo menos:
-
-```json
-{
-  "name": "Nome da escola",
-  "active": true,
-  "bookSequences": {}
-}
-```
-
-5. Publique o conteúdo de `firestore.rules` nas regras do Firestore.
+4. Publique o conteúdo de `firestore.rules` nas regras do Firestore.
+5. Entre no Libris com o administrador. Se `schools/{schoolId}` não existir ou estiver sem nome, o app abre a configuração inicial. Informe o nome da escola para criar o documento e liberar o painel.
 6. Se a escola usar outro identificador, configure o mesmo `schoolId` no perfil do administrador e em `script.js`.
 
 Em uma base já existente, faça backup e confira que todos os documentos administrativos tenham o `schoolId` correto antes de publicar as regras. Documentos sem esse campo serão negados; faça o backfill por escola usando o Admin SDK e valide os dados antes do deploy.
@@ -31,6 +22,37 @@ SCHOOL_ID=escola-padrao node migrate.js
 ```
 
 Todos os documentos migrados e registros de auditoria recebem esse `schoolId`; a migração falha se a variável não estiver definida.
+
+## Backup semanal no Google Drive
+
+A função `weeklySchoolDriveBackup` gera, toda segunda-feira às 03h (horário de Fortaleza), um JSON independente por escola. Cada arquivo contém o documento da escola e livros, categorias, leitores, empréstimos, reservas, contadores, auditoria e perfis com o `schoolId` correspondente.
+
+Para configurar o destino:
+
+1. Ative o faturamento Blaze no Firebase e a Google Drive API no Google Cloud. O Cloud Scheduler usado pelo agendamento requer faturamento ativo.
+2. Crie um Drive Compartilhado e uma pasta para os backups. Compartilhe a pasta com o e-mail da conta de serviço como **Administrador de conteúdo**. Contas de serviço não têm armazenamento próprio no Meu Drive.
+3. Instale e autentique o Firebase CLI, instale as dependências das Functions e crie o segredo:
+
+```sh
+npm install -g firebase-tools
+firebase login
+npm install --prefix functions
+firebase functions:secrets:set GOOGLE_DRIVE_BACKUP_CONFIG
+```
+
+Quando solicitado, informe um JSON com os dados da conta de serviço e o ID da pasta compartilhada. Preserve `\\n` como escapes na chave privada; não grave a chave em arquivos do repositório:
+
+```json
+{"clientEmail":"backup-bot@projeto.iam.gserviceaccount.com","privateKey":"-----BEGIN PRIVATE KEY-----\\nCHAVE_PRIVADA\\n-----END PRIVATE KEY-----\\n","folderId":"ID_DA_PASTA_COMPARTILHADA"}
+```
+
+4. Publique apenas a função de backup:
+
+```sh
+firebase deploy --only functions:weeklySchoolDriveBackup
+```
+
+Os arquivos incluem dados administrativos e pessoais. Restrinja as permissões da pasta à equipe responsável pelo backup.
 
 ## Capas, sinopses e avisos por e-mail
 

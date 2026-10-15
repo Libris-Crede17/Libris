@@ -51,6 +51,7 @@ async function uploadSchoolBackup(drive, folderId, schoolDoc, generatedAt) {
       mimeType: 'application/json',
       parents: [folderId]
     },
+    supportsAllDrives: true,
     media: {
       mimeType: 'application/json',
       body: Readable.from([content])

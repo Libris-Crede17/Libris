@@ -43,6 +43,7 @@ const state = {
 
 let pendingCsvImport = null
 const selectedLabelBookIds = new Set()
+let schoolSetupRequired = false
 
 /* -------------------------
    DOM helpers & utilities (blindados)
@@ -1038,6 +1039,7 @@ function clearAdminSubscriptions() { while (state.adminUnsubs.length) try { stat
 function resetAdminState() {
   clearAdminSubscriptions()
   selectedLabelBookIds.clear()
+  schoolSetupRequired = false
   state.user = null
   state.profile = null
   state.readers = []
@@ -1047,6 +1049,8 @@ function resetAdminState() {
   if ($('#adminView')) $('#adminView').hidden = true
   if ($('#openSettingsBtn')) $('#openSettingsBtn').hidden = true
   if ($('#logoutBtn')) $('#logoutBtn').hidden = true
+  if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configurações da escola'
+  modal('settingsModal', false)
   renderReaders()
   renderLoans()
   renderBooks()
@@ -1059,7 +1063,7 @@ function resetAdminState() {
   }
 
   function labelQrPayload(book) {
-    return JSON.stringify({ version: 1, schoolId: config.currentSchoolId, bookId: book.id, code: book.code })
+    return JSON.stringify({ v: 1, s: config.currentSchoolId, b: book.id, c: book.code })
   }
 
   function drawWrappedLabelText(context, text, x, y, maxWidth, lineHeight, maxLines) {
@@ -1093,9 +1097,9 @@ function resetAdminState() {
     if (!toDataURL) throw new Error('O gerador QR não está disponível.')
 
     const qrDataUrl = await toDataURL(labelQrPayload(book), {
-      errorCorrectionLevel: 'M',
-      margin: 1,
-      width: 300,
+      errorCorrectionLevel: 'H',
+      margin: 4,
+      width: 420,
       color: { dark: '#173e2b', light: '#ffffff' }
     })
     const qrImage = new Image()
@@ -1146,15 +1150,15 @@ function resetAdminState() {
     context.fillText(String(book.code || '').toLocaleUpperCase('pt-BR').slice(0, 18), 58, 540)
 
     context.fillStyle = '#ffffff'
-    context.fillRect(798, 160, 246, 310)
-    context.drawImage(qrImage, 812, 164, 218, 218)
+    context.fillRect(770, 144, 300, 324)
+    context.drawImage(qrImage, 780, 154, 280, 280)
     context.fillStyle = '#718078'
     context.font = '700 14px Arial, sans-serif'
     context.textAlign = 'center'
-    context.fillText('IDENTIFICAÇÃO DIGITAL', 921, 416)
+    context.fillText('IDENTIFICAÇÃO DIGITAL', 920, 455)
     context.fillStyle = '#1e5b3d'
     context.font = '700 17px Arial, sans-serif'
-    context.fillText('ESCANEIE PARA CONFERIR', 921, 446)
+    context.fillText('ESCANEIE PARA CONFERIR', 920, 484)
     context.textAlign = 'start'
 
     return canvas
@@ -1539,7 +1543,10 @@ function acceptScannedBook(rawValue) {
 
   let payload = null
   try { payload = JSON.parse(normalizedValue) } catch { /* Leitores antigos podem enviar somente o código */ }
-  if (payload?.schoolId && payload.schoolId !== config.currentSchoolId) {
+  const payloadSchoolId = payload?.schoolId || payload?.s
+  const payloadBookId = payload?.bookId || payload?.b
+  const payloadCode = payload?.code || payload?.c
+  if (payloadSchoolId && payloadSchoolId !== config.currentSchoolId) {
     const message = 'Este código pertence a outra escola. Use uma etiqueta desta unidade.'
     if ($('#hardwareScannerStatus')) $('#hardwareScannerStatus').textContent = message
     if ($('#qrScannerStatus')) $('#qrScannerStatus').textContent = message
@@ -1547,9 +1554,9 @@ function acceptScannedBook(rawValue) {
     return false
   }
 
-  const matchedCode = payload?.code || normalizedValue.match(/(?:^|[^A-Z0-9])([A-Z0-9]{1,4}-\d{4})(?:$|[^A-Z0-9])/i)?.[1] || normalizedValue
-  const book = payload?.bookId
-    ? state.books.find((item) => item.id === payload.bookId)
+  const matchedCode = payloadCode || normalizedValue.match(/(?:^|[^A-Z0-9])([A-Z0-9]{1,4}-\d{4})(?:$|[^A-Z0-9])/i)?.[1] || normalizedValue
+  const book = payloadBookId
+    ? state.books.find((item) => item.id === payloadBookId)
     : state.books.find((item) => item.code?.toUpperCase() === String(matchedCode).toUpperCase())
   if (!book) {
     const message = 'Livro não encontrado no acervo desta escola.'
@@ -1736,11 +1743,13 @@ function setup() {
   if ($('#exportXlsxOption')) $('#exportXlsxOption').onclick = exportXlsx
   if ($('#openSettingsBtn')) $('#openSettingsBtn').onclick = () => {
     syncSchoolSettingsForm()
+    if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configurações da escola'
     modal('settingsModal', true)
   }
 
   $$('.modal [data-close]').forEach((b) => b.onclick = () => {
     if (b.dataset.close === 'loginModal' && state.profile?.role !== 'admin') return
+    if (b.dataset.close === 'settingsModal' && schoolSetupRequired) return toast('Informe o nome da escola para concluir a configuração inicial.', 'error')
     if (b.dataset.close === 'qrScannerModal') stopQrScanner()
     modal(b.dataset.close, false)
   })
@@ -1768,6 +1777,7 @@ async function saveSchoolSettings(event) {
   event.preventDefault()
   if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
 
+  const schoolName = $('#schoolNameInput')?.value.trim() || ''
   const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
   const reminderDays = Number($('#reminderDaysInput')?.value || 1)
   const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
@@ -1776,9 +1786,15 @@ async function saveSchoolSettings(event) {
   const maxBooksTeacher = Number($('#maxBooksTeacherInput')?.value || config.maxBooksTeacher || 35)
   const teacherLoanDays = Number($('#teacherLoanDaysInput')?.value || config.teacherLoanDays || 21)
 
+  if (!schoolName) return toast('Informe o nome da escola para continuar.', 'error')
+
   try {
     const schoolRef = doc(db, 'schools', config.currentSchoolId)
+    const existingSchool = schoolSetupRequired ? await getDoc(schoolRef) : null
+    const initialFields = schoolSetupRequired && !existingSchool?.exists() ? { active: true, bookSequences: {} } : {}
     await setDoc(schoolRef, {
+      ...initialFields,
+      name: schoolName,
       coordinationEmail,
       reminderDays,
       coordinationDays,
@@ -1788,6 +1804,7 @@ async function saveSchoolSettings(event) {
       updatedAt: serverTimestamp()
     }, { merge: true })
 
+    config.schoolName = schoolName
     config.coordinationEmail = coordinationEmail
     config.reminderDays = reminderDays
     config.coordinationDays = coordinationDays
@@ -1795,7 +1812,20 @@ async function saveSchoolSettings(event) {
     config.maxBooksTeacher = maxBooksTeacher
     config.teacherLoanDays = teacherLoanDays
     syncSchoolSettingsForm(config)
-    await logAudit('school_settings_updated', { schoolId: config.currentSchoolId, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+
+    if (schoolSetupRequired) {
+      if (!await loadSchoolData(config.currentSchoolId)) throw new Error('As configurações da escola não puderam ser recarregadas.')
+      await subscribeAdmin()
+      if (auth.currentUser?.uid !== state.user?.uid) return
+      schoolSetupRequired = false
+      if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configurações da escola'
+      if ($('#adminView')) $('#adminView').hidden = false
+      if ($('#openSettingsBtn')) $('#openSettingsBtn').hidden = false
+      if ($('#logoutBtn')) $('#logoutBtn').hidden = false
+      modal('loginModal', false)
+    }
+
     modal('settingsModal', false)
     toast('Configurações salvas com sucesso.')
   } catch (err) {
@@ -1804,6 +1834,7 @@ async function saveSchoolSettings(event) {
 }
 
 function syncSchoolSettingsForm(data = config) {
+  const schoolNameInput = $('#schoolNameInput')
   const coordinationEmailInput = $('#coordinationEmailInput')
   const reminderDaysInput = $('#reminderDaysInput')
   const coordinationDaysInput = $('#coordinationDaysInput')
@@ -1812,6 +1843,7 @@ function syncSchoolSettingsForm(data = config) {
   const teacherLoanDaysInput = $('#teacherLoanDaysInput')
   const settings = data || {}
 
+  if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
   if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
   if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
   if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
@@ -1826,10 +1858,17 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
 
   try {
     config.currentSchoolId = schoolId || config.currentSchoolId
+    config.schoolName = ''
+    config.coordinationEmail = ''
+    config.reminderDays = 1
+    config.coordinationDays = 7
+    config.maxBooksStudent = 2
+    config.maxBooksTeacher = 35
+    config.teacherLoanDays = 21
     const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
     if (school.exists()) {
       const data = school.data()
-      if (data.name) config.schoolName = data.name
+      config.schoolName = String(data.name || '').trim()
       config.coordinationEmail = data.coordinationEmail || ''
       config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
@@ -1840,9 +1879,9 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       return false
     }
     const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
+    if (schoolNameNode) schoolNameNode.textContent = config.schoolName || 'Biblioteca escolar'
     syncSchoolSettingsForm()
-    return true
+    return Boolean(config.schoolName)
   } catch (err) {
     error(err, 'Não foi possível carregar a escola vinculada ao login.')
     return false
@@ -1959,10 +1998,15 @@ async function init() {
     }
 
     if (!await loadSchoolData(state.profile.schoolId)) {
-      resetAdminState()
-      modal('loginModal', true)
-      toast('A escola vinculada ao administrador não foi encontrada.', 'error')
-      try { await signOut(auth) } catch (e) { /* ignore */ }
+      schoolSetupRequired = true
+      if (adminView) adminView.hidden = true
+      if (settingsButton) settingsButton.hidden = true
+      if (logoutButton) logoutButton.hidden = false
+      if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configuração inicial da escola'
+      if ($('#schoolNameInput')) $('#schoolNameInput').value = ''
+      modal('loginModal', false)
+      modal('settingsModal', true)
+      $('#schoolNameInput')?.focus()
       return
     }
 
