@@ -18,138 +18,64 @@ const config = {
     publicKey: '3NnWny8jJqnZwiFWU' 
   }
 }
-const defaultCategories = [ ]
+
+const defaultCategories = []
 const categories = [{ id: 'all', name: 'Todas' }, ...defaultCategories]
-const fallbackBooks = [ ]
-const fallbackReaders = [ ]
-const fallbackLoans = [ ]
+const fallbackBooks = []
+const fallbackReaders = []
+const fallbackLoans = []
 const canUseFirebase = Boolean(firebaseReady && auth && db)
-const state = { user: null, profile: null, books: [], readers: [], loans: [], csv: [], categories: [...defaultCategories], category: 'all', status: 'all', query: '', acervoQuery: '', readerQuery: '', publicUnsubs: [], adminUnsubs: [], loanFilter: 'all' }
+
+const state = {
+  user: null,
+  profile: null,
+  books: [],
+  readers: [],
+  loans: [],
+  csv: [],
+  categories: [...defaultCategories],
+  acervoQuery: '',
+  readerQuery: '',
+  adminUnsubs: [],
+  loanFilter: 'all'
+}
+
 let pendingCsvImport = null
 
-function syncSchoolSettingsForm(data = config) {
-  const coordinationEmailInput = $('#coordinationEmailInput')
-  const reminderDaysInput = $('#reminderDaysInput')
-  const coordinationDaysInput = $('#coordinationDaysInput')
-  const maxBooksStudentInput = $('#maxBooksStudentInput')
-  const maxBooksTeacherInput = $('#maxBooksTeacherInput')
-  const teacherLoanDaysInput = $('#teacherLoanDaysInput')
-  const settings = data || {}
-
-  if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
-  if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
-  if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
-  if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
-  if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
-  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
-}
-
-async function loadSchoolData(schoolId = config.currentSchoolId) {
-  if (!canUseFirebase || !db) return
-
-  try {
-    config.currentSchoolId = schoolId || config.currentSchoolId
-    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (school.exists()) {
-      const data = school.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-    }
-    const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
-    syncSchoolSettingsForm()
-  } catch (err) {
-    error(err, 'Não foi possível carregar a escola vinculada ao login.')
-  }
-}
-
-async function resolveUserSchool(user) {
-  if (!canUseFirebase || !db || !user) {
-    await ensureCurrentSchoolId()
-    const schoolNameNode = $('#schoolName')
-    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
-    return
-  }
-
-  try {
-    const userDoc = await getDoc(doc(db, 'users', user.uid))
-    const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
-    await loadSchoolData(schoolId)
-    await ensureCurrentSchoolId()
-    return userDoc.exists() ? userDoc.data() : null
-  } catch (err) {
-    error(err, 'Não foi possível recuperar a escola deste usuário.')
-    return null
-  }
-}
-
-async function ensureCurrentSchoolId() {
-  if (!canUseFirebase || !db) return
-
-  try {
-    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
-    if (schoolDoc.exists()) {
-      const data = schoolDoc.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      syncSchoolSettingsForm()
-      return
-    }
-
-    const schoolsSnap = await getDocs(collection(db, 'schools'))
-    if (!schoolsSnap.empty) {
-      const firstSchool = schoolsSnap.docs[0]
-      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
-      config.currentSchoolId = firstSchoolId
-      const data = firstSchool.data()
-      if (data.name) config.schoolName = data.name
-      config.coordinationEmail = data.coordinationEmail || ''
-      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
-      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
-      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
-      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
-      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-    } else {
-      config.currentSchoolId = 'escola-padrao'
-      config.schoolName = 'Biblioteca escolar'
-      config.coordinationEmail = ''
-      config.reminderDays = 1
-      config.coordinationDays = 7
-      config.maxBooksStudent = 2
-      config.maxBooksTeacher = 35
-      config.teacherLoanDays = 21
-    }
-    syncSchoolSettingsForm()
-  } catch (err) {
-    config.currentSchoolId = 'escola-padrao'
-    config.schoolName = 'Biblioteca escolar'
-    config.coordinationEmail = ''
-    config.reminderDays = 1
-    config.coordinationDays = 7
-    config.maxBooksStudent = 2
-    config.maxBooksTeacher = 35
-    config.teacherLoanDays = 21
-    syncSchoolSettingsForm()
-  }
-}
+/* -------------------------
+   DOM helpers & utilities
+   ------------------------- */
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => [...document.querySelectorAll(s)]
-const e = { grid: $('#bookGrid'), results: $('#resultsMeta'), categories: $('#categoryFilters'), books: $('#bookTableBody'), readers: $('#readersTableBody'), loans: $('#loansTableBody'), kpis: $('#kpiGrid'), genre: $('#genreChart'), course: $('#courseChart'), topReaders: $('#readerChart'), donut: $('#statusDonut'), legend: $('#statusLegend'), toast: $('#toast') }
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
 const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
 const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
 const available = (b) => Number(b.available || 0) > 0
+const bookStatus = (b) => available(b) ? 'disponivel' : 'emprestado'
+const date = (v) => v?.toDate ? v.toDate() : v ? new Date(v) : null
+const formatDate = (v) => date(v)?.toLocaleDateString('pt-BR') || '—'
+const overdue = (l) => l.status === 'active' && date(l.dueAt) < new Date()
 
+function toast(message, type = 'success') { const el = $('#toast'); if (!el) return; el.textContent = message; el.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = 'toast hidden' }, 4000) }
+function error(err, message = 'Não foi possível conectar ao servidor. Verifique sua conexão.') { console.error(err); toast(err?.code === 'auth/invalid-credential' ? 'E-mail ou senha inválidos.' : message, 'error') }
+function loading(button, value, text = 'Aguarde…') { if (!button) return; button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
+
+/* Modal helper with accessibility blur on close */
+function modal(id, open) { 
+  const el = document.getElementById(id); 
+  if (el) { 
+    if (!open) {
+      const activeElement = el.querySelector(':focus');
+      if (activeElement) activeElement.blur();
+    }
+    el.classList.toggle('hidden', !open); 
+    el.setAttribute('aria-hidden', String(!open)); 
+  } 
+}
+
+/* -------------------------
+   Metadata lookup (admin)
+   ------------------------- */
 async function lookupBookMetadata(title, author, publisher) {
   const query = [title, author, publisher].filter(Boolean).join(' ')
   if (!query) return { synopsis: '', coverUrl: '' }
@@ -181,30 +107,116 @@ async function lookupBookMetadata(title, author, publisher) {
     return { synopsis: '', coverUrl: '' }
   }
 }
-const bookStatus = (b) => available(b) ? 'disponivel' : 'emprestado'
-const date = (v) => v?.toDate ? v.toDate() : v ? new Date(v) : null
-const formatDate = (v) => date(v)?.toLocaleDateString('pt-BR') || '—'
-const overdue = (l) => l.status === 'active' && date(l.dueAt) < new Date()
 
-function toast(message, type = 'success') { if (!e.toast) return; e.toast.textContent = message; e.toast.className = `toast ${type}`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { e.toast.className = 'toast hidden' }, 4000) }
-function error(err, message = 'Não foi possível conectar ao servidor. Verifique sua conexão.') { console.error(err); toast(err?.code === 'auth/invalid-credential' ? 'E-mail ou senha inválidos.' : message, 'error') }
-function loading(button, value, text = 'Aguarde…') { if (!button) return; button.disabled = value; if (value) { button.dataset.text = button.textContent; button.textContent = text } else button.textContent = button.dataset.text || button.textContent }
+/* -------------------------
+   UI renderers (admin)
+   ------------------------- */
+function renderCategorySelect() {
+  const select = $('#bookCategoryInput')
+  if (!select) return
+  const categoriesList = state?.categories || []
+  select.innerHTML = categoriesList.map((c) => {
+    const codeVal = String(c.code || c.id || '').toUpperCase()
+    return `<option value="${codeVal}">${esc(c.name)}</option>`
+  }).join('')
+}
 
-// Correção aplicada: retira o foco de elementos internos ao fechar o modal para evitar o aviso de aria-hidden do navegador
-function modal(id, open) { 
-  const el = document.getElementById(id); 
-  if (el) { 
-    if (!open) {
-      const activeElement = el.querySelector(':focus');
-      if (activeElement) activeElement.blur();
-    }
-    el.classList.toggle('hidden', !open); 
-    el.setAttribute('aria-hidden', String(!open)); 
-  } 
+function renderCategoryList() {
+  const list = $('#categoryList')
+  if (!list) return
+  list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${c.id}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
+  $$('[data-del-category]').forEach((b) => b.onclick = () => removeCategory(b.dataset.delCategory))
+}
+
+function renderBooks() { 
+  if (!$('#bookTableBody')) return;
+  const q = state.acervoQuery.toLowerCase().trim()
+  const list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q)))
+  const body = $('#bookTableBody')
+  body.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; 
+  $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
+  $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook))
+}
+
+function renderReaderSelector() {
+  const select = $('#readerSelectInput')
+  if (!select) return
+  const options = ['<option value="">Selecione um leitor</option>']
+  state.readers.forEach((reader) => {
+    const labelText = `${reader.name} · ${reader.type}${reader.type === 'Aluno' && reader.matricula ? ` · ${reader.matricula}` : ''}`
+    options.push(`<option value="${reader.id}">${esc(labelText)}</option>`)
+  })
+  select.innerHTML = options.join('')
+}
+
+function renderReaders() { 
+  if (!$('#readersTableBody')) return;
+  const q = state.readerQuery.toLowerCase().trim()
+  const list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
+  const body = $('#readersTableBody')
+  body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
+  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
+  $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
+  renderReaderSelector()
 }
 
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
 
+function renderBars(target, data) { if (!target) return; if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
+
+function renderDashboard() { 
+  const active = state.loans.filter((l) => l.status === 'active') 
+  const overdueCount = active.filter(overdue).length
+
+  const values = [
+    ['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚', 'acervo'],
+    ['Empréstimos Ativos', active.length, '📖', 'checkout'],
+    ['Livros em Atraso', overdueCount, '⚠️', 'checkout'],
+    ['Leitores Cadastrados', state.readers.length, '👥', 'leitores']
+  ]
+
+  const kpiGrid = $('#kpiGrid')
+  if (kpiGrid) {
+    kpiGrid.innerHTML = values.map(([name, value, icon, targetTab]) => `
+      <div class="kpi-card panel clickable-kpi" data-target-tab="${targetTab}" style="cursor: pointer;">
+        <div class="kpi-card-head">
+          <span>${esc(name)}</span>
+          <span class="kpi-icon">${icon}</span>
+        </div>
+        <div class="kpi-value">${value}</div>
+      </div>
+    `).join('')
+
+    $$('.clickable-kpi').forEach((card) => {
+      card.onclick = () => {
+        const targetTab = card.dataset.targetTab
+        if (targetTab) {
+          if (targetTab === 'checkout') {
+            state.loanFilter = 'all'
+          }
+          // activate tab
+          $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === targetTab))
+          $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === targetTab))
+          renderLoans()
+        }
+      }
+    })
+  }
+
+  renderBars($('#genreChart'), getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5))
+  const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0)
+  const free = state.books.reduce((n, b) => n + Number(b.available || 0), 0)
+  const percent = total ? Math.round(free / total * 100) : 0
+  if ($('#statusDonut')) $('#statusDonut').innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`
+  if ($('#statusLegend')) $('#statusLegend').innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`
+  renderBars($('#courseChart'), count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
+  const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
+  if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
+}
+
+/* -------------------------
+   CRUD Admin actions
+   ------------------------- */
 function normalizeBookCode(value) {
   return String(value ?? '').replace(/\D+/g, '').slice(0, 4).padStart(4, '0')
 }
@@ -216,7 +228,6 @@ function getLoanLimitForReader(reader = {}) {
 
 async function logAudit(action, details = {}, actorUid = null) {
   if (!canUseFirebase || !db) return
-
   try {
     await addDoc(collection(db, 'audit_logs'), {
       actorUid: actorUid || state.user?.uid || null,
@@ -229,254 +240,7 @@ async function logAudit(action, details = {}, actorUid = null) {
   }
 }
 
-function renderCategories() {
-  const options = [{ id: 'all', name: 'Todas' }, ...getCategoryOptions()]
-  if (e.categories) {
-    e.categories.innerHTML = options.map((c) => `<button type="button" class="category-chip ${state.category === c.id ? 'is-active' : ''}" data-category="${c.id}">${c.name}</button>`).join('')
-    $$('[data-category]').forEach((b) => b.onclick = () => { state.category = b.dataset.category; renderCategories(); renderPublicBooks() })
-  }
-}
-
-function renderCategorySelect() {
-  const select = $('#bookCategoryInput')
-  if (!select) return
-  const categoriesList = state?.categories || []
-  select.innerHTML = categoriesList.map((c) => {
-    const codeVal = String(c.code || c.id || '').toUpperCase()
-    return `<option value="${codeVal}">${c.name}</option>`
-  }).join('')
-}
-
-function renderCategoryList() {
-  const list = $('#categoryList')
-  if (!list) return
-  list.innerHTML = getCategoryOptions().length ? getCategoryOptions().map((c) => `<div class="category-item"><span>${esc(c.name)}</span><small>${esc(c.code || c.id)}</small><button type="button" class="small-btn danger" data-del-category="${c.id}">Apagar</button></div>`).join('') : '<p class="empty-state">Nenhuma categoria cadastrada.</p>'
-  $$('[data-del-category]').forEach((b) => b.onclick = () => removeCategory(b.dataset.delCategory))
-}
-
-function filteredBooks() { const q = state.query.toLowerCase().trim(); return state.books.filter((b) => (!q || [b.title, b.author, b.code, label(b.categoryId)].some((v) => String(v || '').toLowerCase().includes(q))) && (state.category === 'all' || b.categoryId === state.category) && (state.status === 'all' || bookStatus(b) === state.status)) }
-
-function renderPublicBooks() { 
-  const list = filteredBooks(); 
-  if (e.results) e.results.textContent = `${list.length} ${list.length === 1 ? 'resultado' : 'resultados'}`; 
-  if (e.grid) e.grid.innerHTML = list.length ? list.map((b) => `<button class="book-card" type="button" data-book="${b.id}"><div class="book-cover ${b.coverUrl ? 'has-cover' : ''}">${b.coverUrl ? `<img class="book-cover-art" src="${b.coverUrl}" alt="Capa de ${esc(b.title)}">` : `<div class="book-cover-top"><span>${esc(b.categoryId)}</span><span>${esc(b.year || '—')}</span></div><div><div class="book-cover-title">${esc(b.title)}</div><div class="book-cover-author">${esc(b.author)}</div></div>`}</div><div class="book-card-meta"><div class="book-code-row"><span class="book-code">${esc(b.code)}</span><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></div><div class="book-card-title">${esc(b.title)}</div><div class="book-card-author">${esc(b.author)}</div><div class="book-card-category">${esc(b.categoryId)} · ${esc(label(b.categoryId))}</div><div class="book-card-location">📍 ${esc(b.shelf || 'Não informada')}</div></div></button>`).join('') : '<div class="panel empty-state">Nenhum livro encontrado.</div>'; 
-  $$('[data-book]').forEach((b) => b.onclick = () => showBook(state.books.find((x) => x.id === b.dataset.book))) 
-}
-
-function showBook(b) { if (!b) return; $('#bookModalContent').innerHTML = `<div class="book-modal-cover">${b.coverUrl ? `<img class="book-cover-art modal-cover-art" src="${b.coverUrl}" alt="Capa de ${esc(b.title)}">` : `<div class="book-cover"><div class="book-cover-top"><span>${esc(b.categoryId)}</span><span>${esc(b.year || '—')}</span></div><div><div class="book-cover-title">${esc(b.title)}</div><div class="book-cover-author">${esc(b.author)}</div></div></div>`}</div><div class="book-details"><span class="eyebrow">${esc(label(b.categoryId))}</span><h3>${esc(b.title)}</h3><p>${esc(b.author)} · ${esc(b.year || 'Ano não informado')}</p><div class="book-meta-grid"><div class="meta-box"><div class="meta-label">ID</div><div class="meta-value">${esc(b.code)}</div></div><div class="meta-box"><div class="meta-label">Disponibilidade</div><div class="meta-value">${Number(b.available || 0)} de ${Number(b.total || 0)}</div></div><div class="meta-box"><div class="meta-label">Editora</div><div class="meta-value">${esc(b.publisher || 'Não informada')}</div></div><div class="meta-box"><div class="meta-label">Localização</div><div class="meta-value">${esc(b.shelf || 'Não informada')}</div></div></div><p>${esc(b.synopsis || 'Sinopse não informada.')}</p><div class="qr-box"><div class="qr-shape" aria-hidden="true"></div><small>QR Code público do livro<br><strong>${esc(b.code)}</strong></small></div></div>`; modal('bookModal', true) }
-
-function renderBars(target, data) { if (!target) return; if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
-
-function renderDashboard() { 
-  const active = state.loans.filter((l) => l.status === 'active'); 
-  const overdueCount = active.filter(overdue).length;
-
-  const values = [
-    ['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚', 'acervo'],
-    ['Empréstimos Ativos', active.length, '📖', 'checkout'],
-    ['Livros em Atraso', overdueCount, '⚠️', 'checkout'],
-    ['Leitores Cadastrados', state.readers.length, '👥', 'leitores']
-  ]; 
-
-  if (e.kpis) {
-    e.kpis.innerHTML = values.map(([name, value, icon, targetTab]) => `
-      <div class="kpi-card panel clickable-kpi" data-target-tab="${targetTab}" style="cursor: pointer;">
-        <div class="kpi-card-head">
-          <span>${name}</span>
-          <span class="kpi-icon">${icon}</span>
-        </div>
-        <div class="kpi-value">${value}</div>
-      </div>
-    `).join('');
-
-    $$('.clickable-kpi').forEach((card) => {
-      card.onclick = () => {
-        const targetTab = card.dataset.targetTab;
-        if (targetTab) {
-          const cardTitle = card.querySelector('span')?.textContent;
-          
-          if (cardTitle === 'Livros em Atraso') {
-            state.loanFilter = 'overdue';
-          } else if (cardTitle === 'Empréstimos Ativos') {
-            state.loanFilter = 'all';
-          }
-
-          tab(targetTab);    
-          renderLoans();    
-        }
-      };
-    });
-  } // <--- CHAVE DE FECHAMENTO CORRIGIDA AQUI (ESTAVA FALTANDO E CAUSANDO O ERRO DE SINTAXE)
-
-  renderBars(e.genre, getCategoryOptions().map((c) => ({ label: c.name, value: state.books.filter((b) => b.categoryId === c.id).length })).filter((x) => x.value).sort((a, b) => b.value - a.value).slice(0, 5)); 
-  const total = state.books.reduce((n, b) => n + Number(b.total || 0), 0), free = state.books.reduce((n, b) => n + Number(b.available || 0), 0), percent = total ? Math.round(free / total * 100) : 0; 
-  if (e.donut) e.donut.innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`; 
-  if (e.legend) e.legend.innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`; 
-  renderBars(e.course, count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5)); 
-  const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5); 
-  if (e.topReaders) e.topReaders.innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>' 
-}
-
-function hydrateFallbackData() {
-  state.categories = [...defaultCategories]
-  state.books = fallbackBooks.map((book) => {
-    const total = Number(book.total || 0)
-    const available = Number(book.available ?? total)
-    return { ...book, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
-  })
-  state.readers = fallbackReaders
-  state.loans = fallbackLoans.map((loan) => ({ ...loan, dueAt: loan.dueAt instanceof Date ? loan.dueAt : new Date(loan.dueAt), status: loan.status || 'active' }))
-  renderCategorySelect()
-  renderCategoryList()
-  renderPublicBooks()
-  renderBooks()
-  renderReaders()
-  renderLoans()
-  renderDashboard()
-}
-
-function renderLoans() {
-  if (!e.loans) return
-
-  const list = state.loans.filter((l) => {
-    if (l.status !== 'active') return false
-
-    const reader = state.readers.find((r) => r.id === l.readerId)
-    const role = String(reader?.role || reader?.type || '').toLowerCase()
-
-    if (state.loanFilter === 'student') return role === 'student' || role === 'aluno'
-    if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
-    if (state.loanFilter === 'overdue') return overdue(l)
-    
-    return true
-  })
-
-  e.loans.innerHTML = list.length ? list.map((l) => {
-    const selectedDays = Number(l.days || 7)
-    const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
-    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
-  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
-
-  $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return)); 
-  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew));
-  $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify));
-
-  const filterSelect = $('#loanFilterSelect')
-  if (filterSelect) {
-    filterSelect.value = state.loanFilter || 'all'
-    filterSelect.onchange = (evt) => {
-      state.loanFilter = evt.target.value
-      renderLoans()
-    }
-  }
-}
-  
-function renderBooks() { 
-  if (!e.books) return;
-  const q = state.acervoQuery.toLowerCase().trim(), list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q))); 
-  e.books.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; 
-  $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
-  $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook)) 
-}
-
-function renderReaderSelector() {
-  const select = $('#readerSelectInput')
-  if (!select) return
-  const options = ['<option value="">Selecione um leitor</option>']
-  state.readers.forEach((reader) => {
-    const label = `${reader.name} · ${reader.type}${reader.type === 'Aluno' && reader.matricula ? ` · ${reader.matricula}` : ''}`
-    options.push(`<option value="${reader.id}">${esc(label)}</option>`)
-  })
-  select.innerHTML = options.join('')
-}
-
-function renderReaders() { 
-  if (!e.readers) return;
-  const q = state.readerQuery.toLowerCase().trim(), list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))); 
-  e.readers.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
-  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
-  $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
-  renderReaderSelector() 
-}
-
-function updateReaderFields() { 
-  const typeSelect = $('#readerTypeInput');
-  if (!typeSelect) return;
-  const student = typeSelect.value === 'Aluno'; 
-  [['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => { 
-    const f = $(s); 
-    if (f) {
-      f.hidden = !visible; 
-      f.classList.toggle('hidden', !visible) 
-    }
-  }); 
-  if ($('#readerCourseInput')) $('#readerCourseInput').required = student; 
-  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').required = student; 
-  if ($('#readerCpfInput')) $('#readerCpfInput').required = !student 
-}
-
-function tab(name) { $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name)); $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === name)) }
-
-function resetBookForm() { 
-  const form = $('#bookForm');
-  if (form) form.reset(); 
-  if ($('#bookIdInput')) $('#bookIdInput').value = ''; 
-  const titleHeader = $('#bookModalTitle');
-  if (titleHeader) titleHeader.textContent = 'Cadastrar livro'; 
-  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Salvar livro'; 
-  renderCategorySelect(); 
-  if ($('#bookYearInput')) $('#bookYearInput').value = new Date().getFullYear(); 
-  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = 1 
-}
-
-function resetReaderForm() { 
-  const form = $('#readerForm');
-  if (form) form.reset(); 
-  if ($('#readerIdInput')) $('#readerIdInput').value = ''; 
-  const titleHeader = $('#readerModalTitle');
-  if (titleHeader) titleHeader.textContent = 'Cadastrar leitor'; 
-  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Salvar leitor'; 
-  updateReaderFields() 
-}
-
-function editBook(id) { 
-  const book = state.books.find((item) => item.id === id); 
-  if (!book) return; 
-  if ($('#bookIdInput')) $('#bookIdInput').value = id; 
-  if ($('#bookTitleInput')) $('#bookTitleInput').value = book.title || ''; 
-  if ($('#bookAuthorInput')) $('#bookAuthorInput').value = book.author || ''; 
-  if ($('#bookPublisherInput')) $('#bookPublisherInput').value = book.publisher || ''; 
-  if ($('#bookCategoryInput')) $('#bookCategoryInput').value = book.categoryId || ''; 
-  if ($('#bookYearInput')) $('#bookYearInput').value = book.year || ''; 
-  if ($('#bookShelfInput')) $('#bookShelfInput').value = book.shelf || ''; 
-  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = Number(book.total || 1); 
-  if ($('#bookTombamentoInput')) $('#bookTombamentoInput').value = book.tombamento || ''; 
-  
-  const titleHeader = $('#bookModalTitle');
-  if (titleHeader) titleHeader.textContent = 'Editar livro'; 
-  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Atualizar livro'; 
-  modal('bookFormModal', true);
-}
-
-function editReader(id) { 
-  const reader = state.readers.find((item) => item.id === id); 
-  if (!reader) return; 
-  if ($('#readerIdInput')) $('#readerIdInput').value = id; 
-  if ($('#readerNameInput')) $('#readerNameInput').value = reader.name || ''; 
-  if ($('#readerTypeInput')) $('#readerTypeInput').value = reader.type || 'Aluno'; 
-  if ($('#readerCourseInput')) $('#readerCourseInput').value = reader.course || ''; 
-  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').value = reader.matricula || ''; 
-  if ($('#readerCpfInput')) $('#readerCpfInput').value = reader.cpf || ''; 
-  if ($('#readerEmailInput')) $('#readerEmailInput').value = reader.email || ''; 
-  if ($('#readerPhoneInput')) $('#readerPhoneInput').value = reader.phone || ''; 
-  
-  const titleHeader = $('#readerModalTitle');
-  if (titleHeader) titleHeader.textContent = 'Editar leitor'; 
-  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Atualizar leitor'; 
-  updateReaderFields();
-  modal('readerFormModal', true);
-}
-
+/* Book form: add / edit */
 async function addBook(event) {
   event.preventDefault()
   const button = $('#bookForm button[type="submit"]')
@@ -508,7 +272,7 @@ async function addBook(event) {
   try {
     if (editingId) {
       const availableCopies = book.total - borrowedCopies
-      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory?.name || categoryId, updatedAt: serverTimestamp() })
+      await updateDoc(doc(db, 'books', editingId), { ...book, available: availableCopies, status: availableCopies ? 'disponivel' : 'emprestado', categoryName: selectedCategory?.name || categoryId, schoolId: config.currentSchoolId, updatedAt: serverTimestamp() })
       await logAudit('book_updated', { bookId: editingId, total: book.total }, state.user?.uid || null)
       resetBookForm()
       modal('bookFormModal', false)
@@ -537,6 +301,7 @@ async function addBook(event) {
         categoryName: categoryName,
         schoolId: config.currentSchoolId,
         available: book.total,
+        total: book.total,
         status: 'disponivel',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -550,6 +315,7 @@ async function addBook(event) {
   } catch (err) { error(err, 'Não foi possível salvar o livro.') } finally { loading(button, false) }
 }
 
+/* Categories */
 async function addCategory(event) {
   event.preventDefault()
   const button = $('#categoryForm button[type="submit"]')
@@ -579,6 +345,7 @@ async function removeCategory(id) {
   } catch (err) { error(err, 'Não foi possível apagar a categoria.') }
 }
 
+/* Readers */
 async function addReader(event) {
   event.preventDefault()
   const button = $('#readerForm button[type="submit"]')
@@ -614,6 +381,7 @@ async function addReader(event) {
   } catch (err) { error(err, 'Não foi possível salvar o leitor.') } finally { loading(button, false) }
 }
 
+/* Remove book / reader */
 async function removeBook(id) {
   if (state.loans.some((loan) => loan.bookId === id && loan.status === 'active')) return toast('Não é possível apagar um livro com empréstimo ativo.', 'error')
   if (!confirm('Apagar este livro do acervo?')) return
@@ -626,6 +394,7 @@ async function removeReader(id) {
   try { await deleteDoc(doc(db, 'readers', id)); toast('Leitor apagado.') } catch (err) { error(err, 'Não foi possível apagar o leitor.') }
 }
 
+/* Loans */
 async function registerLoan() {
   const button = $('#registerLoanBtn')
   const code = $('#bookCodeInput')?.value.trim().toUpperCase()
@@ -633,7 +402,7 @@ async function registerLoan() {
   const selectedReaderId = $('#readerSelectInput')?.value
   const days = Number($('#loanDays')?.value || 7)
   const book = state.books.find((b) => b.code?.toUpperCase() === code)
-  const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text.toLowerCase())
+  const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLowerCase() === text?.toLowerCase())
 
   if (!book || !reader) {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
@@ -670,14 +439,15 @@ async function registerLoan() {
         throw new Error('indisponível')
       }
 
-      const available = Number(bookSnap.data().available || 0)
+      const availableCopies = Number(bookSnap.data().available || 0)
       const due = new Date()
       const effectiveDays = role === 'teacher' ? Number(config.teacherLoanDays || days || 21) : Number(days || 7)
       due.setDate(due.getDate() + effectiveDays)
 
       tx.update(bookRef, {
         available: increment(-1),
-        status: available - 1 > 0 ? 'disponivel' : 'emprestado',
+        status: availableCopies - 1 > 0 ? 'disponivel' : 'emprestado',
+        schoolId: bookSnap.data().schoolId || config.currentSchoolId,
         updatedAt: serverTimestamp()
       })
 
@@ -715,7 +485,28 @@ async function registerLoan() {
   }
 }
 
-async function returnLoan(id) { try { await runTransaction(db, async (tx) => { const loanRef = doc(db, 'loans', id), loan = await tx.get(loanRef); if (!loan.exists() || loan.data().status !== 'active') throw new Error('inválido'); const bookRef = doc(db, 'books', loan.data().bookId), book = await tx.get(bookRef); tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp() }); if (book.exists()) { const free = Math.min(Number(book.data().available || 0) + 1, Number(book.data().total || 0)); tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp() }) } }); await logAudit('loan_returned', { loanId: id }, state.user?.uid || null); toast('Livro devolvido.') } catch (err) { error(err, 'Não foi possível registrar a devolução.') } }
+async function returnLoan(id) {
+  try {
+    await runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', id)
+      const loanSnap = await tx.get(loanRef)
+      if (!loanSnap.exists() || loanSnap.data().status !== 'active') throw new Error('inválido')
+      const bookRef = doc(db, 'books', loanSnap.data().bookId)
+      const bookSnap = await tx.get(bookRef)
+
+      tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp(), schoolId: loanSnap.data().schoolId || config.currentSchoolId })
+
+      if (bookSnap.exists()) {
+        const free = Math.min(Number(bookSnap.data().available || 0) + 1, Number(bookSnap.data().total || 0))
+        tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp(), schoolId: bookSnap.data().schoolId || config.currentSchoolId })
+      }
+    })
+    await logAudit('loan_returned', { loanId: id }, state.user?.uid || null)
+    toast('Livro devolvido.')
+  } catch (err) {
+    error(err, 'Não foi possível registrar a devolução.')
+  }
+}
 
 async function renewLoan(id) {
   const loan = state.loans.find((l) => l.id === id)
@@ -725,73 +516,13 @@ async function renewLoan(id) {
   try {
     const due = date(loan.dueAt) ? new Date(date(loan.dueAt)) : new Date()
     due.setDate(due.getDate() + days)
-    await updateDoc(doc(db, 'loans', id), { days, dueAt: Timestamp.fromDate(due), notices: {}, updatedAt: serverTimestamp() })
+    await updateDoc(doc(db, 'loans', id), { days, dueAt: Timestamp.fromDate(due), notices: {}, schoolId: config.currentSchoolId, updatedAt: serverTimestamp() })
     await logAudit('loan_renewed', { loanId: id, days }, state.user?.uid || null)
     toast(`Renovação concluída por ${days} dias.`)
   } catch (err) { error(err, 'Não foi possível renovar o empréstimo.') }
 }
 
-function notify(id) { 
-  const loan = state.loans.find((l) => l.id === id), reader = state.readers.find((r) => r.id === loan?.readerId); 
-  if (!loan) return; 
-  if ($('#notificationContact')) $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`; 
-  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`; 
-  const modalEl = $('#notificationModal'); 
-  if (modalEl) modalEl.dataset.loanId = String(id); 
-  modal('notificationModal', true) 
-}
-
-let qrScannerStream = null
-let qrScanFrame = null
-
-function stopQrScanner() {
-  if (qrScanFrame) cancelAnimationFrame(qrScanFrame)
-  qrScanFrame = null
-  qrScannerStream?.getTracks().forEach((track) => track.stop())
-  qrScannerStream = null
-  const video = $('#qrScannerVideo')
-  if (video) {
-    video.pause()
-    video.srcObject = null
-  }
-}
-
-async function startQrScanner() {
-  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return toast('Seu navegador não oferece leitura de QR code. Digite o ID do livro.', 'error')
-  const video = $('#qrScannerVideo')
-  const status = $('#qrScannerStatus')
-  modal('qrScannerModal', true)
-  try {
-    qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-    video.srcObject = qrScannerStream
-    await video.play()
-    if (status) status.textContent = 'Aponte a câmera para o código do livro.'
-    const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
-    const scan = async () => {
-      if (!qrScannerStream) return
-      try {
-        const codes = await detector.detect(video)
-        const code = codes.find((item) => item.rawValue)?.rawValue
-        if (code) {
-          if ($('#bookCodeInput')) $('#bookCodeInput').value = code.trim().toUpperCase()
-          stopQrScanner()
-          modal('qrScannerModal', false)
-          toast('ID do livro preenchido pelo QR code.')
-          return
-        }
-      } catch (err) {
-        console.warn('Não foi possível ler o QR code:', err)
-      }
-      qrScanFrame = requestAnimationFrame(scan)
-    }
-    scan()
-  } catch (err) {
-    stopQrScanner()
-    modal('qrScannerModal', false)
-    toast(err?.name === 'NotAllowedError' ? 'Permita o acesso à câmera para escanear o livro.' : 'Não foi possível abrir a câmera.', 'error')
-  }
-}
-
+/* Notifications */
 function normalizePhone(phone = '') {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -834,19 +565,19 @@ async function sendEmailNotification(reader, message, loan, recipient = reader, 
   try {
     window.emailjs.init({ publicKey })
     await window.emailjs.send(serviceId, templateId, {
-      to_email: email,                                   
+      to_email: email,
       to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso da Biblioteca',                      
-      message: message,                                   
-      school_name: config.schoolName,                     
-      escola: config.schoolName,                          
-      organization: config.organizationName,              
-      name: reader?.name || 'Leitor',                     
-      livro: loan?.bookTitle || '',                      
-      loan_days: Number(loan?.days || 0),                
-      data_vencimento: dueDate,                           
-      date: dueDate,                                      
-      dias_atraso: diasAtraso                            
+      subject: 'Aviso da Biblioteca',
+      message: message,
+      school_name: config.schoolName,
+      escola: config.schoolName,
+      organization: config.organizationName,
+      name: reader?.name || 'Leitor',
+      livro: loan?.bookTitle || '',
+      loan_days: Number(loan?.days || 0),
+      data_vencimento: dueDate,
+      date: dueDate,
+      dias_atraso: diasAtraso
     })
     return true
   } catch (error) {
@@ -910,9 +641,12 @@ async function triggerNotification(type) {
   modal('notificationModal', false)
 }
 
+/* -------------------------
+   CSV import / export
+   ------------------------- */
 const bookExportRows = () => [['Código', 'Título', 'Autor', 'Editora', 'Categoria', 'Ano', 'Localização', 'Disponíveis', 'Total', 'Tombamento'], ...state.books.map((book) => [book.code, book.title, book.author, book.publisher || '', label(book.categoryId), book.year || '', book.shelf || '', book.available, book.total, book.tombamento || ''])]
 
-function exportCsv() { const csv = bookExportRows().map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
+function exportCsv() { const rows = bookExportRows(); const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'relatorio-acervo.csv'; a.click(); URL.revokeObjectURL(a.href) }
 function exportXlsx() { const sheet = XLSX.utils.aoa_to_sheet(bookExportRows()); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Acervo'); XLSX.writeFile(workbook, 'relatorio-acervo.xlsx') }
 
 const normalizeCsvHeader = (value) => String(value ?? '').replace(/^\uFEFF/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -946,7 +680,7 @@ async function importCsv(event) {
   const file = input.files?.[0]
   if (!file) return
   modal('importCsvFileModal', false)
-  if (!canUseFirebase || !db || !state.user) { input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
+  if (!canUseFirebase || !db || !state.user) { if (input) input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
 
   try {
     const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: false })
@@ -960,6 +694,7 @@ async function importCsv(event) {
     })
     if (headerRowIndex < 0) {
       const preview = rows.slice(0, 3).map((row) => row.filter(Boolean).join(', ')).filter(Boolean).join(' / ')
+      if (input) input.value = ''
       return toast(`Não encontrei as colunas Código e Título. Cabeçalhos lidos: ${preview || 'nenhum'}.`, 'error')
     }
 
@@ -968,6 +703,7 @@ async function importCsv(event) {
     const missing = required.filter((header) => columns[header] === undefined)
     if (missing.length) {
       const detected = rows[headerRowIndex].filter(Boolean).join(', ')
+      if (input) input.value = ''
       return toast(`Colunas obrigatórias ausentes: ${missing.join(', ')}. Cabeçalhos lidos: ${detected}.`, 'error')
     }
 
@@ -1041,15 +777,15 @@ async function importCsv(event) {
       countersToUpdate.set(prefix, Math.max(countersToUpdate.get(prefix) || 0, codeNumber))
     })
 
-    if (errors.length) return toast(`Corrija as linhas inválidas: ${errors.slice(0, 4).join('; ')}${errors.length > 4 ? '; …' : ''}. Nada foi importado.`, 'error')
-    if (!booksToImport.length) return toast(skipped.length ? `Nenhum livro novo. ${skipped.length} código(s) já existiam no acervo.` : 'Nenhum livro válido para importar.', 'error')
+    if (errors.length) { if (input) input.value = ''; return toast(`Corrija as linhas inválidas: ${errors.slice(0, 4).join('; ')}${errors.length > 4 ? '; …' : ''}. Nada foi importado.`, 'error') }
+    if (!booksToImport.length) { if (input) input.value = ''; return toast(skipped.length ? `Nenhum livro novo. ${skipped.length} código(s) já existiam no acervo.` : 'Nenhum livro válido para importar.', 'error') }
     pendingCsvImport = { books: booksToImport, counters: countersToUpdate, skippedCount: skipped.length }
     if ($('#importCsvSummary')) $('#importCsvSummary').textContent = `Importar ${booksToImport.length} livro(s)? Códigos já existentes serão ignorados.`
     modal('importCsvConfirmModal', true)
   } catch (err) {
     error(err, 'Não foi possível ler ou validar o CSV.')
   } finally {
-    input.value = ''
+    if (input) input.value = ''
   }
 }
 
@@ -1088,48 +824,280 @@ async function confirmCsvImport() {
   }
 }
 
-function subscribeBooks() {
+/* -------------------------
+   Subscriptions (admin-only)
+   ------------------------- */
+function clearAdminSubscriptions() { while (state.adminUnsubs.length) state.adminUnsubs.pop()() }
+
+function subscribeAdmin() {
   if (!canUseFirebase || !db) return
-  state.publicUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
+  clearAdminSubscriptions()
+  const activeSchoolId = config.currentSchoolId
+
+  // Books (filtered by schoolId)
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'books'), where('schoolId', '==', activeSchoolId)), (snap) => {
     state.books = snap.docs.map((d) => {
       const data = d.data()
       const total = Number(data.total || 0)
       const available = Number(data.available ?? total)
       return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
     })
-    renderPublicBooks(); renderBooks(); renderDashboard()
+    renderBooks(); renderDashboard()
   }, (err) => error(err)))
-}
 
-function subscribeCategories() {
-  if (!canUseFirebase || !db) return
-  state.publicUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', config.currentSchoolId)), (snap) => {
+  // Categories (filtered by schoolId)
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'categories'), where('schoolId', '==', activeSchoolId)), (snap) => {
     state.categories = snap.docs.map((d) => ({ id: d.data().id || d.id, ...d.data() }))
-    renderCategories();
-    renderCategorySelect();
-    renderCategoryList();
-    renderPublicBooks();
-    renderBooks();
-    renderDashboard();
+    renderCategorySelect(); renderCategoryList(); renderBooks(); renderDashboard()
+  }, (err) => error(err)))
+
+  // Readers (filtered by schoolId)
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => {
+    state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    renderReaders(); renderDashboard()
+  }, (err) => error(err)))
+
+  // Loans (filtered by schoolId)
+  state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => {
+    state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    renderLoans(); renderDashboard()
   }, (err) => error(err)))
 }
 
-function clearPublicSubscriptions() { while (state.publicUnsubs.length) state.publicUnsubs.pop()() }
-function clearAdminSubscriptions() { while (state.adminUnsubs.length) state.adminUnsubs.pop()() }
-
-function subscribeAdmin() {
-  if (!canUseFirebase || !db || !auth) return
-  clearAdminSubscriptions();
-  const activeSchoolId = config.currentSchoolId
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'readers'), where('schoolId', '==', activeSchoolId)), (snap) => { state.readers = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderReaders(); renderDashboard() }, (err) => error(err)));
-  state.adminUnsubs.push(onSnapshot(query(collection(db, 'loans'), where('schoolId', '==', activeSchoolId)), (snap) => { state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() })); renderLoans(); renderDashboard() }, (err) => error(err)))
+/* -------------------------
+   Forms / modals helpers
+   ------------------------- */
+function resetBookForm() { 
+  const form = $('#bookForm')
+  if (form) form.reset()
+  if ($('#bookIdInput')) $('#bookIdInput').value = ''
+  const titleHeader = $('#bookModalTitle')
+  if (titleHeader) titleHeader.textContent = 'Cadastrar livro'
+  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Salvar livro'
+  renderCategorySelect()
+  if ($('#bookYearInput')) $('#bookYearInput').value = new Date().getFullYear()
+  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = 1
 }
 
-function view(name) { 
-  if ($('#publicView')) $('#publicView').classList.toggle('is-active', name === 'public'); 
-  if ($('#adminView')) $('#adminView').classList.toggle('is-active', name === 'admin'); $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.view === name)) 
+function resetReaderForm() { 
+  const form = $('#readerForm')
+  if (form) form.reset()
+  if ($('#readerIdInput')) $('#readerIdInput').value = ''
+  const titleHeader = $('#readerModalTitle')
+  if (titleHeader) titleHeader.textContent = 'Cadastrar leitor'
+  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Salvar leitor'
+  updateReaderFields()
 }
 
+function editBook(id) { 
+  const book = state.books.find((item) => item.id === id)
+  if (!book) return
+  if ($('#bookIdInput')) $('#bookIdInput').value = id
+  if ($('#bookTitleInput')) $('#bookTitleInput').value = book.title || ''
+  if ($('#bookAuthorInput')) $('#bookAuthorInput').value = book.author || ''
+  if ($('#bookPublisherInput')) $('#bookPublisherInput').value = book.publisher || ''
+  if ($('#bookCategoryInput')) $('#bookCategoryInput').value = book.categoryId || ''
+  if ($('#bookYearInput')) $('#bookYearInput').value = book.year || ''
+  if ($('#bookShelfInput')) $('#bookShelfInput').value = book.shelf || ''
+  if ($('#bookQuantityInput')) $('#bookQuantityInput').value = Number(book.total || 1)
+  if ($('#bookTombamentoInput')) $('#bookTombamentoInput').value = book.tombamento || ''
+  
+  const titleHeader = $('#bookModalTitle')
+  if (titleHeader) titleHeader.textContent = 'Editar livro'
+  if ($('#saveBookBtn')) $('#saveBookBtn').textContent = 'Atualizar livro'
+  modal('bookFormModal', true)
+}
+
+function editReader(id) { 
+  const reader = state.readers.find((item) => item.id === id)
+  if (!reader) return
+  if ($('#readerIdInput')) $('#readerIdInput').value = id
+  if ($('#readerNameInput')) $('#readerNameInput').value = reader.name || ''
+  if ($('#readerTypeInput')) $('#readerTypeInput').value = reader.type || 'Aluno'
+  if ($('#readerCourseInput')) $('#readerCourseInput').value = reader.course || ''
+  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').value = reader.matricula || ''
+  if ($('#readerCpfInput')) $('#readerCpfInput').value = reader.cpf || ''
+  if ($('#readerEmailInput')) $('#readerEmailInput').value = reader.email || ''
+  if ($('#readerPhoneInput')) $('#readerPhoneInput').value = reader.phone || ''
+  
+  const titleHeader = $('#readerModalTitle')
+  if (titleHeader) titleHeader.textContent = 'Editar leitor'
+  if ($('#saveReaderBtn')) $('#saveReaderBtn').textContent = 'Atualizar leitor'
+  updateReaderFields()
+  modal('readerFormModal', true)
+}
+
+function updateReaderFields() { 
+  const typeSelect = $('#readerTypeInput')
+  if (!typeSelect) return
+  const student = typeSelect.value === 'Aluno'
+  ;[['#readerCourseField', student], ['#readerRegistrationField', student], ['#readerCpfField', !student]].forEach(([s, visible]) => {
+    const f = $(s)
+    if (f) {
+      f.hidden = !visible
+      f.classList.toggle('hidden', !visible)
+    }
+  })
+  if ($('#readerCourseInput')) $('#readerCourseInput').required = student
+  if ($('#readerRegistrationInput')) $('#readerRegistrationInput').required = student
+  if ($('#readerCpfInput')) $('#readerCpfInput').required = !student
+}
+
+/* Loans rendering */
+function renderLoans() {
+  if (!$('#loansTableBody')) return
+
+  const list = state.loans.filter((l) => {
+    if (l.status !== 'active') return false
+
+    const reader = state.readers.find((r) => r.id === l.readerId)
+    const role = String(reader?.role || reader?.type || '').toLowerCase()
+
+    if (state.loanFilter === 'student') return role === 'student' || role === 'aluno'
+    if (state.loanFilter === 'teacher') return role === 'teacher' || role === 'professor'
+    if (state.loanFilter === 'overdue') return overdue(l)
+    
+    return true
+  })
+
+  $('#loansTableBody').innerHTML = list.length ? list.map((l) => {
+    const selectedDays = Number(l.days || 7)
+    const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
+    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
+  }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo encontrado para este filtro.</td></tr>'
+
+  $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return))
+  $$('[data-renew]').forEach((b) => b.onclick = () => renewLoan(b.dataset.renew))
+  $$('[data-notify]').forEach((b) => b.onclick = () => notify(b.dataset.notify))
+
+  const filterSelect = $('#loanFilterSelect')
+  if (filterSelect) {
+    filterSelect.value = state.loanFilter || 'all'
+    filterSelect.onchange = (evt) => {
+      state.loanFilter = evt.target.value
+      renderLoans()
+    }
+  }
+}
+
+/* Notification helper used in table actions */
+function notify(id) {
+  const loan = state.loans.find((l) => l.id === id)
+  const reader = state.readers.find((r) => r.id === loan?.readerId)
+  if (!loan) return
+  if ($('#notificationContact')) $('#notificationContact').textContent = `${reader?.email || loan.readerEmail || 'E-mail não informado'} · ${reader?.phone || 'Telefone não informado'}`
+  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`
+  const modalEl = $('#notificationModal')
+  if (modalEl) modalEl.dataset.loanId = String(id)
+  modal('notificationModal', true)
+}
+
+/* -------------------------
+   QR scanner
+   ------------------------- */
+let qrScannerStream = null
+let qrScanFrame = null
+
+function stopQrScanner() {
+  if (qrScanFrame) cancelAnimationFrame(qrScanFrame)
+  qrScanFrame = null
+  qrScannerStream?.getTracks().forEach((track) => track.stop())
+  qrScannerStream = null
+  const video = $('#qrScannerVideo')
+  if (video) {
+    video.pause()
+    video.srcObject = null
+  }
+}
+
+async function startQrScanner() {
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return toast('Seu navegador não oferece leitura de QR code. Digite o ID do livro.', 'error')
+  const video = $('#qrScannerVideo')
+  const status = $('#qrScannerStatus')
+  modal('qrScannerModal', true)
+  try {
+    qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+    if (video) video.srcObject = qrScannerStream
+    if (video) await video.play()
+    if (status) status.textContent = 'Aponte a câmera para o código do livro.'
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
+    const scan = async () => {
+      if (!qrScannerStream) return
+      try {
+        const codes = await detector.detect(video)
+        const code = codes.find((item) => item.rawValue)?.rawValue
+        if (code) {
+          if ($('#bookCodeInput')) $('#bookCodeInput').value = code.trim().toUpperCase()
+          stopQrScanner()
+          modal('qrScannerModal', false)
+          toast('ID do livro preenchido pelo QR code.')
+          return
+        }
+      } catch (err) {
+        console.warn('Não foi possível ler o QR code:', err)
+      }
+      qrScanFrame = requestAnimationFrame(scan)
+    }
+    scan()
+  } catch (err) {
+    stopQrScanner()
+    modal('qrScannerModal', false)
+    toast(err?.name === 'NotAllowedError' ? 'Permita o acesso à câmera para escanear o livro.' : 'Não foi possível abrir a câmera.', 'error')
+  }
+}
+
+/* -------------------------
+   Form wiring and setup
+   ------------------------- */
+function setup() {
+  // Tabs
+  $$('.tab-btn').forEach((b) => b.onclick = () => {
+    $$('.tab-btn').forEach((tb) => tb.classList.toggle('is-active', tb === b))
+    $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === b.dataset.tab))
+  })
+
+  if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }
+  if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
+  if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : '' }
+
+  if ($('#bookForm')) $('#bookForm').onsubmit = addBook
+  if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory
+  if ($('#readerForm')) $('#readerForm').onsubmit = addReader
+  if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
+  if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
+  if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
+  if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner
+
+  if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true) }
+  if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true) }
+  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true) }
+
+  if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false)
+  if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false)
+  if ($('#exportBtn')) $('#exportBtn').onclick = exportCsv
+  if ($('#exportXlsxBtn')) $('#exportXlsxBtn').onclick = exportXlsx
+
+  $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) })
+
+  if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }
+  if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp')
+  if ($('#sendEmailBtn')) $('#sendEmailBtn').onclick = () => triggerNotification('email')
+  if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
+
+  if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
+    if (!canUseFirebase || !auth) {
+      state.user = null
+      if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
+      toast('Sessão local encerrada.')
+      return
+    }
+    try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
+  }
+}
+
+/* -------------------------
+   School settings
+   ------------------------- */
 async function saveSchoolSettings(event) {
   event.preventDefault()
   if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
@@ -1168,49 +1136,147 @@ async function saveSchoolSettings(event) {
   }
 }
 
-function setup() { 
-  $$('.nav-btn').forEach((b) => b.onclick = () => b.dataset.view === 'admin' && !state.user ? modal('loginModal', true) : view(b.dataset.view)); $$
-('.tab-btn').forEach((b) => b.onclick = () => tab(b.dataset.tab)); 
-  if ($('#searchInput')) $('#searchInput').oninput = (x) => { state.query = x.target.value; renderPublicBooks() }; 
-  if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }; 
-  if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }; 
-  if ($('#readerSelectInput')) $('#readerSelectInput').onchange = () => { const id = $('#readerSelectInput').value; const reader = state.readers.find((item) => item.id === id); if ($('#readerInput')) $('#readerInput').value = reader ? (reader.matricula || reader.name) : ''; }; 
-  $$('.filter-btn').forEach((b) => b.onclick = () => { state.status = b.dataset.status; $$
-('.filter-btn').forEach((x) => x.classList.toggle('is-active', x === b)); renderPublicBooks() }); 
-  
-  if ($('#bookForm')) $('#bookForm').onsubmit = addBook; 
-  if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory; 
-  if ($('#readerForm')) $('#readerForm').onsubmit = addReader; 
-  if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings; 
-  if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields; 
-  if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan; 
-  if ($('#scanBtn')) $('#scanBtn').onclick = startQrScanner; 
-  
-  if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true); };
-  if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true); };
-  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true); };
+function syncSchoolSettingsForm(data = config) {
+  const coordinationEmailInput = $('#coordinationEmailInput')
+  const reminderDaysInput = $('#reminderDaysInput')
+  const coordinationDaysInput = $('#coordinationDaysInput')
+  const maxBooksStudentInput = $('#maxBooksStudentInput')
+  const maxBooksTeacherInput = $('#maxBooksTeacherInput')
+  const teacherLoanDaysInput = $('#teacherLoanDaysInput')
+  const settings = data || {}
 
-  if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false); 
-  if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false); 
-  if ($('#exportBtn')) $('#exportBtn').onclick = exportCsv; 
-  if ($('#exportXlsxBtn')) $('#exportXlsxBtn').onclick = exportXlsx;  $$('.modal [data-close]').forEach((b) => b.onclick = () => { if (b.dataset.close === 'qrScannerModal') stopQrScanner(); modal(b.dataset.close, false) });
-  
-  if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }; 
-  if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp'); 
-  if ($('#sendEmailBtn')) $('#sendEmailBtn').onclick = () => triggerNotification('email'); 
-  if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
-    if (!canUseFirebase || !auth) {
-      state.user = null;
-      if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden');
-      view('public');
-      toast('Sessão local encerrada.');
-      return
-    }
-    try { await signOut(auth); toast('Sessão encerrada.') } catch (err) { error(err) }
-  };
+  if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
+  if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
+  if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
+  if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
+  if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
+  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
+/* Ensure current school data present */
+async function ensureCurrentSchoolId() {
+  if (!canUseFirebase || !db) return
+
+  try {
+    const schoolDoc = await getDoc(doc(db, 'schools', config.currentSchoolId))
+    if (schoolDoc.exists()) {
+      const data = schoolDoc.data()
+      if (data.name) config.schoolName = data.name
+      config.coordinationEmail = data.coordinationEmail || ''
+      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
+      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+      syncSchoolSettingsForm()
+      return
+    }
+
+    const schoolsSnap = await getDocs(collection(db, 'schools'))
+    if (!schoolsSnap.empty) {
+      const firstSchool = schoolsSnap.docs[0]
+      const firstSchoolId = firstSchool.id || firstSchool.data().id || config.currentSchoolId
+      config.currentSchoolId = firstSchoolId
+      const data = firstSchool.data()
+      if (data.name) config.schoolName = data.name
+      config.coordinationEmail = data.coordinationEmail || ''
+      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
+      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+    } else {
+      config.currentSchoolId = 'escola-padrao'
+      config.schoolName = 'Biblioteca escolar'
+      config.coordinationEmail = ''
+      config.reminderDays = 1
+      config.coordinationDays = 7
+      config.maxBooksStudent = 2
+      config.maxBooksTeacher = 35
+      config.teacherLoanDays = 21
+    }
+    syncSchoolSettingsForm()
+  } catch (err) {
+    config.currentSchoolId = 'escola-padrao'
+    config.schoolName = 'Biblioteca escolar'
+    config.coordinationEmail = ''
+    config.reminderDays = 1
+    config.coordinationDays = 7
+    config.maxBooksStudent = 2
+    config.maxBooksTeacher = 35
+    config.teacherLoanDays = 21
+    syncSchoolSettingsForm()
+  }
+}
+
+/* Resolve user profile and its school */
+async function loadSchoolData(schoolId = config.currentSchoolId) {
+  if (!canUseFirebase || !db) return
+
+  try {
+    config.currentSchoolId = schoolId || config.currentSchoolId
+    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
+    if (school.exists()) {
+      const data = school.data()
+      if (data.name) config.schoolName = data.name
+      config.coordinationEmail = data.coordinationEmail || ''
+      config.reminderDays = Number(data.reminderDays ?? data.reminderBeforeDays ?? 1)
+      config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
+      config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
+      config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+    }
+    const schoolNameNode = $('#schoolName')
+    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
+    syncSchoolSettingsForm()
+  } catch (err) {
+    error(err, 'Não foi possível carregar a escola vinculada ao login.')
+  }
+}
+
+async function resolveUserSchool(user) {
+  if (!canUseFirebase || !db || !user) {
+    await ensureCurrentSchoolId()
+    const schoolNameNode = $('#schoolName')
+    if (schoolNameNode) schoolNameNode.textContent = config.schoolName
+    return
+  }
+
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid))
+    const schoolId = userDoc.exists() && userDoc.data().schoolId ? userDoc.data().schoolId : config.currentSchoolId
+    await loadSchoolData(schoolId)
+    await ensureCurrentSchoolId()
+    return userDoc.exists() ? userDoc.data() : null
+  } catch (err) {
+    error(err, 'Não foi possível recuperar a escola deste usuário.')
+    return null
+  }
+}
+
+/* -------------------------
+   Initialization
+   ------------------------- */
+function hydrateFallbackData() {
+  state.categories = [...defaultCategories]
+  state.books = fallbackBooks.map((book) => {
+    const total = Number(book.total || 0)
+    const available = Number(book.available ?? total)
+    return { ...book, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
+  })
+  state.readers = fallbackReaders
+  state.loans = fallbackLoans.map((loan) => ({ ...loan, dueAt: loan.dueAt instanceof Date ? loan.dueAt : new Date(loan.dueAt), status: loan.status || 'active' }))
+  renderCategorySelect()
+  renderCategoryList()
+  renderBooks()
+  renderReaders()
+  renderLoans()
+  renderDashboard()
+}
+
+setup()
 syncSchoolSettingsForm()
+
 if ($('#importCsvBtn')) $('#importCsvBtn').onclick = () => modal('importCsvFileModal', true)
 if ($('#importCsvInput')) $('#importCsvInput').onchange = importCsv
 const cancelCsvFileSelection = () => { if ($('#importCsvInput')) $('#importCsvInput').value = ''; modal('importCsvFileModal', false) }
@@ -1220,7 +1286,6 @@ const cancelCsvImport = () => { pendingCsvImport = null; modal('importCsvConfirm
 if ($('#cancelCsvImportBtn')) $('#cancelCsvImportBtn').onclick = cancelCsvImport
 if ($('#closeCsvImportBtn')) $('#closeCsvImportBtn').onclick = cancelCsvImport
 if ($('#confirmCsvImportBtn')) $('#confirmCsvImportBtn').onclick = confirmCsvImport
-if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 
 if ($('#loginForm')) {
   $('#loginForm').onsubmit = async (x) => {
@@ -1262,26 +1327,31 @@ if ($('#resetPasswordBtn')) {
 }
 
 async function init() {
-  setup();
-  updateReaderFields();
-  renderCategories();
+  updateReaderFields()
+  renderCategorySelect()
+  renderCategoryList()
+  renderBooks()
+  renderReaders()
+  renderLoans()
+  renderDashboard()
+
   if (!canUseFirebase || !db) {
-    hydrateFallbackData();
-    state.user = null;
-    if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden');
-    view('public');
+    hydrateFallbackData()
+    state.user = null
+    if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
     return
   }
-  await ensureCurrentSchoolId();
-  renderCategorySelect();
-  renderCategoryList();
-  renderPublicBooks();
-  renderBooks();
-  renderReaders();
-  renderLoans();
-  renderDashboard();
+
   try {
-    const school = await getDoc(doc(db, 'schools', config.currentSchoolId));
+    await ensureCurrentSchoolId()
+    renderCategorySelect()
+    renderCategoryList()
+    renderBooks()
+    renderReaders()
+    renderLoans()
+    renderDashboard()
+
+    const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
     if (school.exists()) {
       const data = school.data()
       if (data.name) config.schoolName = data.name
@@ -1293,43 +1363,42 @@ async function init() {
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
       syncSchoolSettingsForm()
     }
-    if ($('#schoolName')) $('#schoolName').textContent = config.schoolName;
+    if ($('#schoolName')) $('#schoolName').textContent = config.schoolName
   } catch (err) { error(err) }
-  subscribeBooks();
-  subscribeCategories();
+
+  // Start subscriptions after auth resolved
   onAuthStateChanged(auth, async (user) => {
-    state.user = user;
-    if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user);
+    state.user = user
+    if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user)
     if (user) {
-      const schoolBeforeProfile = config.currentSchoolId;
-      state.profile = await resolveUserSchool(user);
+      const schoolBeforeProfile = config.currentSchoolId
+      state.profile = await resolveUserSchool(user)
       if (state.profile?.role !== 'admin') {
-        state.profile = null;
-        state.user = null;
-        toast('Esta conta não possui acesso administrativo.', 'error');
-        await signOut(auth);
+        state.profile = null
+        state.user = null
+        toast('Esta conta não possui acesso administrativo.', 'error')
+        try { await signOut(auth) } catch (e) {}
         return
       }
       if (schoolBeforeProfile !== config.currentSchoolId) {
-        clearPublicSubscriptions();
-        subscribeBooks();
-        subscribeCategories();
+        // reload admin subscriptions bound to new school
       }
-      subscribeAdmin();
+      subscribeAdmin()
     } else {
-      clearAdminSubscriptions();
-      clearPublicSubscriptions();
-      subscribeBooks();
-      subscribeCategories();
-      state.profile = null;
-      state.readers = [];
-      state.loans = [];
-      renderReaders();
-      renderLoans();
-      renderDashboard();
-      view('public');
+      // user logged out -> clear admin subscriptions and reset admin state
+      clearAdminSubscriptions()
+      state.profile = null
+      state.readers = []
+      state.loans = []
+      state.books = []
+      state.categories = []
+      renderReaders()
+      renderLoans()
+      renderBooks()
+      renderCategoryList()
+      renderDashboard()
     }
   })
 }
 
-init();
+init()
