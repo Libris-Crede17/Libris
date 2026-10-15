@@ -1,3 +1,6 @@
+/* Updated script.js — DOM blindagem e limpeza imediata de subscriptions ao signOut.
+   Preserva obrigatoriedade schoolId, validações de estoque e regras de autenticação. */
+
 import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } from './firebase.js'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
@@ -43,10 +46,10 @@ const state = {
 let pendingCsvImport = null
 
 /* -------------------------
-   DOM helpers & utilities
+   DOM helpers & utilities (blindados)
    ------------------------- */
-const $ = (s) => document.querySelector(s)
-const $$ = (s) => [...document.querySelectorAll(s)]
+const $ = (s) => (typeof document !== 'undefined' ? document?.querySelector?.(s) ?? null : null)
+const $$ = (s) => (typeof document !== 'undefined' ? Array.from(document?.querySelectorAll?.(s) || []) : [])
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
 const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
 const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
@@ -62,15 +65,15 @@ function loading(button, value, text = 'Aguarde…') { if (!button) return; butt
 
 /* Modal helper with accessibility blur on close */
 function modal(id, open) { 
-  const el = document.getElementById(id); 
+  const el = typeof document !== 'undefined' ? document.getElementById(id) : null
   if (el) { 
     if (!open) {
-      const activeElement = el.querySelector(':focus');
-      if (activeElement) activeElement.blur();
+      const activeElement = el.querySelector(':focus')
+      if (activeElement) activeElement.blur()
     }
-    el.classList.toggle('hidden', !open); 
-    el.setAttribute('aria-hidden', String(!open)); 
-  } 
+    el.classList.toggle('hidden', !open)
+    el.setAttribute('aria-hidden', String(!open))
+  }
 }
 
 /* -------------------------
@@ -129,10 +132,10 @@ function renderCategoryList() {
 }
 
 function renderBooks() { 
-  if (!$('#bookTableBody')) return;
+  const body = $('#bookTableBody')
+  if (!body) return;
   const q = state.acervoQuery.toLowerCase().trim()
   const list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q)))
-  const body = $('#bookTableBody')
   body.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>'; 
   $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
   $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook))
@@ -150,10 +153,10 @@ function renderReaderSelector() {
 }
 
 function renderReaders() { 
-  if (!$('#readersTableBody')) return;
+  const body = $('#readersTableBody')
+  if (!body) return;
   const q = state.readerQuery.toLowerCase().trim()
   const list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
-  const body = $('#readersTableBody')
   body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
   $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
   $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
@@ -194,7 +197,6 @@ function renderDashboard() {
           if (targetTab === 'checkout') {
             state.loanFilter = 'all'
           }
-          // activate tab
           $$('.tab-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === targetTab))
           $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === targetTab))
           renderLoans()
@@ -511,7 +513,7 @@ async function returnLoan(id) {
 async function renewLoan(id) {
   const loan = state.loans.find((l) => l.id === id)
   if (!loan) return
-  const select = document.querySelector(`[data-renew-days="${id}"]`)
+  const select = document.querySelector?.(`[data-renew-days="${id}"]`)
   const days = Number(select?.value || loan.days || 7)
   try {
     const due = date(loan.dueAt) ? new Date(date(loan.dueAt)) : new Date()
@@ -677,7 +679,7 @@ function parseCsvInteger(value) { const text = String(value ?? '').trim(); if (!
 
 async function importCsv(event) {
   const input = event.target
-  const file = input.files?.[0]
+  const file = input?.files?.[0]
   if (!file) return
   modal('importCsvFileModal', false)
   if (!canUseFirebase || !db || !state.user) { if (input) input.value = ''; return toast('Entre no painel administrativo para importar livros.', 'error') }
@@ -827,7 +829,7 @@ async function confirmCsvImport() {
 /* -------------------------
    Subscriptions (admin-only)
    ------------------------- */
-function clearAdminSubscriptions() { while (state.adminUnsubs.length) state.adminUnsubs.pop()() }
+function clearAdminSubscriptions() { while (state.adminUnsubs.length) try { state.adminUnsubs.pop()() } catch (e) { console.warn('erro ao limpar subscription:', e) } }
 
 function subscribeAdmin() {
   if (!canUseFirebase || !db) return
@@ -945,7 +947,8 @@ function updateReaderFields() {
 
 /* Loans rendering */
 function renderLoans() {
-  if (!$('#loansTableBody')) return
+  const tbody = $('#loansTableBody')
+  if (!tbody) return
 
   const list = state.loans.filter((l) => {
     if (l.status !== 'active') return false
@@ -960,7 +963,7 @@ function renderLoans() {
     return true
   })
 
-  $('#loansTableBody').innerHTML = list.length ? list.map((l) => {
+  tbody.innerHTML = list.length ? list.map((l) => {
     const selectedDays = Number(l.days || 7)
     const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
     return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
@@ -1085,6 +1088,8 @@ function setup() {
   if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
 
   if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
+    // CLEAR subscriptions immediately to avoid orphan listeners
+    try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed before signOut:', e) }
     if (!canUseFirebase || !auth) {
       state.user = null
       if ($('#logoutBtn')) $('#logoutBtn').classList.add('hidden')
@@ -1366,7 +1371,6 @@ async function init() {
     if ($('#schoolName')) $('#schoolName').textContent = config.schoolName
   } catch (err) { error(err) }
 
-  // Start subscriptions after auth resolved
   onAuthStateChanged(auth, async (user) => {
     state.user = user
     if ($('#logoutBtn')) $('#logoutBtn').classList.toggle('hidden', !user)
@@ -1374,16 +1378,20 @@ async function init() {
       const schoolBeforeProfile = config.currentSchoolId
       state.profile = await resolveUserSchool(user)
       if (state.profile?.role !== 'admin') {
+        // Immediate cleanup before forcing sign out to avoid orphan listeners
+        try { clearAdminSubscriptions() } catch (e) { console.warn('clearAdminSubscriptions failed:', e) }
         state.profile = null
         state.user = null
         toast('Esta conta não possui acesso administrativo.', 'error')
-        try { await signOut(auth) } catch (e) {}
+        try { await signOut(auth) } catch (e) { /* ignore */ }
         return
       }
       if (schoolBeforeProfile !== config.currentSchoolId) {
-        // reload admin subscriptions bound to new school
+        // If school changed as part of profile resolution, refresh admin subscriptions bound to new school
+        subscribeAdmin()
+      } else {
+        subscribeAdmin()
       }
-      subscribeAdmin()
     } else {
       // user logged out -> clear admin subscriptions and reset admin state
       clearAdminSubscriptions()
