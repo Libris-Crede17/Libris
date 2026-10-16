@@ -1,8 +1,15 @@
 /* Updated script.js — DOM blindagem e limpeza imediata de subscriptions ao signOut.
    Preserva obrigatoriedade schoolId, validações de estoque e regras de autenticação. */
 
-import { firebaseReady, auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } from './firebase.js'
+import { firebaseReady, auth, googleProvider, googleDriveProvider, GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, signInWithPopup, signOut } from './firebase.js'
+import { createLocalStore } from './local-store.mjs'
+import { createLocalDataApi } from './local-data.mjs'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
+
+const localStore = createLocalStore()
+const localData = createLocalDataApi(localStore)
+const { db, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } = localData
+const LIBRIS_ADMIN_EMAIL = 'admin@crede17.ce.gov.br'
 
 const config = {
   organizationName: 'Libris',
@@ -38,6 +45,7 @@ const state = {
   readerQuery: '',
   loanQuery: '',
   adminUnsubs: [],
+  driveAccessToken: '',
   loanFilter: 'all'
 }
 
@@ -191,37 +199,14 @@ function selectLoanReader(readerId) {
 }
 
 function renderReaders() { 
-  const body = $('#readersTableBody');
+  const body = $('#readersTableBody')
   if (!body) return;
-
-  const q = state.readerQuery.toLowerCase().trim();
-  const list = state.readers.filter((r) => 
-    !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q))
-  ); 
-
-  body.innerHTML = list.length ? list.map((r) => {
-    // Identifica o tipo do leitor sem poluir o HTML
-    const typeLabel = r.type || (r.role === 'teacher' ? 'Professor' : r.role === 'student' ? 'Aluno' : 'Outros');
-    const docLabel = r.type === 'Aluno' ? (r.matricula || 'Não informado') : (r.cpf || 'Não informado');
-
-    return `<tr>
-      <td>${esc(r.name)}</td>
-      <td>${esc(typeLabel)}</td>
-      <td>${esc(r.course || r.class || 'Não se aplica')}</td>
-      <td>${esc(docLabel)}</td>
-      <td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td>
-      <td>
-        <div class="action-row">
-          <button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button>
-          <button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="6" class="text-center">Nenhum leitor cadastrado.</td></tr>'; 
-
-  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader));$$
-('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
-  renderReaderSelector();
+  const q = state.readerQuery.toLowerCase().trim()
+  const list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
+  body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>'; 
+  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
+  $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
+  renderReaderSelector()
 }
 
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
@@ -425,7 +410,7 @@ async function addReader(event) {
   const button = $('#readerForm button[type="submit"]')
   const editingId = $('#readerIdInput')?.value
   const type = $('#readerTypeInput')?.value || 'Aluno'
-  const role = type === 'Professor' ? 'teacher' : type === 'Aluno' ? 'student' : 'other'
+  const role = type === 'Professor' ? 'teacher' : type === 'Responsável' ? 'guardian' : 'student'
   const reader = {
     schoolId: config.currentSchoolId,
     name: $('#readerNameInput')?.value.trim(),
@@ -800,6 +785,105 @@ function backupFileBaseName() {
   return `libris-backup-${schoolId}-${new Date().toISOString().slice(0, 10)}`
 }
 
+async function getDriveAccessToken() {
+  if (state.driveAccessToken) return state.driveAccessToken
+  const result = await signInWithPopup(auth, googleDriveProvider)
+  const credential = GoogleAuthProvider.credentialFromResult(result)
+  if (!credential?.accessToken) throw new Error('O Google não forneceu acesso ao Drive. Entre novamente e autorize o acesso aos arquivos.')
+  const identityResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${credential.accessToken}` }
+  })
+  if (!identityResponse.ok) throw new Error('Não foi possível confirmar a conta Google usada no Drive.')
+  const identity = await identityResponse.json()
+  if (String(identity.email || '').toLowerCase() !== String(state.user?.email || '').toLowerCase()) {
+    throw new Error('Entre no Drive com o mesmo email autorizado no Libris.')
+  }
+  state.driveAccessToken = credential.accessToken
+  return state.driveAccessToken
+}
+
+async function updateDriveBackupStatus() {
+  const button = $('#backupDriveBtn')
+  const status = $('#backupDriveStatus')
+  if (!button || !status || state.profile?.role !== 'admin') return false
+  const backup = await getDoc(doc(db, '_local_metadata', `drive-backup-${config.currentSchoolId}`))
+  const lastBackupAt = backup.exists() ? new Date(backup.data().lastBackupAt || 0) : null
+  const due = !lastBackupAt || Date.now() - lastBackupAt.getTime() >= 7 * 24 * 60 * 60 * 1000
+  button.hidden = false
+  button.textContent = due ? 'Enviar backup semanal' : 'Backup no Drive'
+  status.hidden = false
+  status.textContent = due
+    ? 'Backup semanal pendente. O envio ocorre com esta máquina ligada e conectada.'
+    : `Último backup: ${lastBackupAt.toLocaleString('pt-BR')}`
+  return due
+}
+
+async function uploadDriveBackup() {
+  const button = $('#backupDriveBtn')
+  if (!state.user || state.profile?.role !== 'admin') return
+  loading(button, true, 'Enviando backup…')
+  try {
+    const accessToken = await getDriveAccessToken()
+    const snapshot = await localStore.exportSchool(config.currentSchoolId)
+    const boundary = `libris_${globalThis.crypto?.randomUUID?.() || Date.now()}`
+    const filename = `${backupFileBaseName()}.json`
+    const metadata = JSON.stringify({ name: filename, mimeType: 'application/json' })
+    const content = JSON.stringify(snapshot)
+    const body = [
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}`,
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${content}`,
+      `--${boundary}--`
+    ].join('\r\n')
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`
+      },
+      body
+    })
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}))
+      if (response.status === 401) state.driveAccessToken = ''
+      throw new Error(result.error?.message || 'O Google Drive recusou o backup.')
+    }
+    const uploadedFile = await response.json()
+    await setDoc(doc(db, '_local_metadata', `drive-backup-${config.currentSchoolId}`), {
+      lastBackupAt: new Date(),
+      filename,
+      driveFileId: uploadedFile.id
+    })
+    toast('Backup semanal enviado ao Google Drive.')
+  } catch (err) {
+    console.error('Falha no backup semanal:', err)
+    error(err, 'Não foi possível enviar o backup ao Google Drive.')
+  } finally {
+    loading(button, false)
+    await updateDriveBackupStatus()
+  }
+}
+
+async function restoreLocalBackup(event) {
+  const input = event.target
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const snapshot = JSON.parse(await file.text())
+    if (snapshot.schoolId !== config.currentSchoolId || !snapshot.collections) {
+      throw new Error('Este arquivo não é um backup válido desta escola.')
+    }
+    if (!confirm(`O backup substituirá os dados locais de ${config.schoolName}. Deseja continuar?`)) return
+    await localStore.replaceSchool(config.currentSchoolId, snapshot)
+    if (!await loadSchoolData(config.currentSchoolId)) throw new Error('Não foi possível carregar as configurações restauradas.')
+    await subscribeAdmin()
+    toast('Backup restaurado nesta máquina.')
+  } catch (err) {
+    error(err, 'Não foi possível restaurar o backup JSON.')
+  } finally {
+    input.value = ''
+  }
+}
+
 function downloadBlob(blob, filename) {
   const link = document.createElement('a')
   const url = URL.createObjectURL(blob)
@@ -1065,11 +1149,15 @@ function resetAdminState() {
   schoolSetupRequired = false
   state.user = null
   state.profile = null
+  state.driveAccessToken = ''
   state.readers = []
   state.loans = []
   state.books = []
   state.categories = []
+  if ($('#librisAdminView')) $('#librisAdminView').hidden = true
   if ($('#adminView')) $('#adminView').hidden = true
+  if ($('#backupDriveBtn')) $('#backupDriveBtn').hidden = true
+  if ($('#backupDriveStatus')) $('#backupDriveStatus').hidden = true
   if ($('#openSettingsBtn')) $('#openSettingsBtn').hidden = true
   if ($('#logoutBtn')) $('#logoutBtn').hidden = true
   if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configurações da escola'
@@ -1474,8 +1562,6 @@ function renderLoans() {
       ? role === 'student' || role === 'aluno'
       : state.loanFilter === 'teacher'
         ? role === 'teacher' || role === 'professor'
-      : state.loanFilter === 'other'
-        ? role === 'guardian' || role === 'outros' || (role !== 'student' && role !== 'aluno' && role !== 'teacher' && role !== 'professor')
         : state.loanFilter === 'overdue'
           ? overdue(l)
           : true
@@ -1711,6 +1797,7 @@ function setup() {
   if ($('#bookForm')) $('#bookForm').onsubmit = addBook
   if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory
   if ($('#readerForm')) $('#readerForm').onsubmit = addReader
+  if ($('#librisConfigForm')) $('#librisConfigForm').onsubmit = saveLibrisConfiguration
   if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
   if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
   if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
@@ -1764,6 +1851,9 @@ function setup() {
   if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false)
   if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false)
   if ($('#exportBtn')) $('#exportBtn').onclick = () => modal('exportModal', true)
+  if ($('#backupDriveBtn')) $('#backupDriveBtn').onclick = () => uploadDriveBackup()
+  if ($('#restoreBackupBtn')) $('#restoreBackupBtn').onclick = () => $('#restoreBackupInput')?.click()
+  if ($('#restoreBackupInput')) $('#restoreBackupInput').onchange = restoreLocalBackup
   if ($('#exportCsvOption')) $('#exportCsvOption').onclick = exportCsv
   if ($('#exportXlsxOption')) $('#exportXlsxOption').onclick = exportXlsx
   if ($('#openSettingsBtn')) $('#openSettingsBtn').onclick = () => {
@@ -1798,9 +1888,70 @@ function setup() {
 /* -------------------------
    School settings
    ------------------------- */
+function fillLibrisConfigurationForm(school = {}) {
+  if ($('#librisSchoolIdInput')) $('#librisSchoolIdInput').value = school.id || ''
+  if ($('#librisSchoolNameInput')) $('#librisSchoolNameInput').value = school.name || ''
+  if ($('#librisAuthorizedEmailsInput')) $('#librisAuthorizedEmailsInput').value = (school.authorizedEmails || []).join('\n')
+  if ($('#librisEmailServiceInput')) $('#librisEmailServiceInput').value = school.emailjs?.serviceId || ''
+  if ($('#librisStudentTemplateInput')) $('#librisStudentTemplateInput').value = school.emailjs?.studentTemplateId || ''
+  if ($('#librisCoordinationTemplateInput')) $('#librisCoordinationTemplateInput').value = school.emailjs?.coordinationTemplateId || ''
+  if ($('#librisEmailPublicKeyInput')) $('#librisEmailPublicKeyInput').value = school.emailjs?.publicKey || ''
+}
+
+async function saveLibrisConfiguration(event) {
+  event.preventDefault()
+  if (state.profile?.role !== 'libris_admin') return toast('Somente a conta Libris pode alterar esta configuração.', 'error')
+
+  const schoolId = $('#librisSchoolIdInput')?.value.trim().toLowerCase()
+  const schoolName = $('#librisSchoolNameInput')?.value.trim()
+  const authorizedEmails = [...new Set(String($('#librisAuthorizedEmailsInput')?.value || '')
+    .split(/[\n,;]/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean))]
+  if (!schoolId || !/^[a-z0-9_-]+$/.test(schoolId) || !schoolName) return toast('Informe um identificador válido e o nome da escola.', 'error')
+  if (!authorizedEmails.length || authorizedEmails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return toast('Informe pelo menos um email válido por linha.', 'error')
+
+  const school = {
+    id: schoolId,
+    schoolId,
+    name: schoolName,
+    authorizedEmails,
+    emailjs: {
+      serviceId: $('#librisEmailServiceInput')?.value.trim() || '',
+      studentTemplateId: $('#librisStudentTemplateInput')?.value.trim() || '',
+      coordinationTemplateId: $('#librisCoordinationTemplateInput')?.value.trim() || '',
+      publicKey: $('#librisEmailPublicKeyInput')?.value.trim() || ''
+    },
+    active: true,
+    updatedAt: new Date()
+  }
+
+  try {
+    const existingSchools = await localStore.list('schools')
+    if (existingSchools.length && !existingSchools.some((item) => item.id === schoolId)) {
+      return toast('Este computador já está configurado para outra escola. Não altere o identificador por aqui.', 'error')
+    }
+    await setDoc(doc(db, 'schools', schoolId), school, { merge: true })
+    const existingUsers = await localStore.list('users')
+    for (const user of existingUsers.filter((item) => item.schoolId === schoolId && item.email)) {
+      const active = authorizedEmails.includes(String(user.email).toLowerCase())
+      await setDoc(doc(db, 'users', user.id), { ...user, active, updatedAt: new Date() }, { merge: true })
+    }
+    for (const email of authorizedEmails) {
+      await setDoc(doc(db, 'users', email), { email, role: 'admin', schoolId, active: true, updatedAt: new Date() }, { merge: true })
+    }
+    config.currentSchoolId = schoolId
+    config.schoolName = schoolName
+    config.emailjs = school.emailjs
+    toast('Configuração local salva. Os emails autorizados podem entrar nesta máquina.')
+  } catch (err) {
+    error(err, 'Não foi possível salvar a configuração local.')
+  }
+}
+
 async function saveSchoolSettings(event) {
   event.preventDefault()
-  if (!canUseFirebase || !db) return toast('Configurações só podem ser salvas com Firebase ativo.', 'error')
+  if (!canUseFirebase || !db) return toast('Entre com uma conta autorizada para alterar as configurações.', 'error')
 
   const schoolName = $('#schoolNameInput')?.value.trim() || ''
   const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
@@ -1848,7 +1999,9 @@ async function saveSchoolSettings(event) {
       if ($('#adminView')) $('#adminView').hidden = false
       if ($('#openSettingsBtn')) $('#openSettingsBtn').hidden = false
       if ($('#logoutBtn')) $('#logoutBtn').hidden = false
+      if ($('#backupDriveBtn')) $('#backupDriveBtn').hidden = false
       modal('loginModal', false)
+      await updateDriveBackupStatus()
     }
 
     modal('settingsModal', false)
@@ -1877,7 +2030,7 @@ function syncSchoolSettingsForm(data = config) {
   if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
-/* Load school settings after profile authorization */
+/* Load school settings after local email authorization. */
 async function loadSchoolData(schoolId = config.currentSchoolId) {
   if (!canUseFirebase || !db) return
 
@@ -1900,6 +2053,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
+      if (data.emailjs) config.emailjs = { ...config.emailjs, ...data.emailjs }
     } else {
       return false
     }
@@ -1917,8 +2071,34 @@ async function resolveUserSchool(user) {
   if (!canUseFirebase || !db || !user) return null
 
   try {
-    const userDoc = await getDoc(doc(db, 'users', user.uid))
-    return userDoc.exists() ? userDoc.data() : null
+    const email = String(user.email || '').trim().toLowerCase()
+    if (!email) return null
+    if (email === LIBRIS_ADMIN_EMAIL) {
+      const usesPasswordProvider = user.providerData?.some((provider) => provider.providerId === 'password')
+      return usesPasswordProvider ? { role: 'libris_admin', email } : null
+    }
+
+    const schools = await localStore.list('schools')
+    const school = schools.find((item) => (item.authorizedEmails || []).map((value) => String(value).toLowerCase()).includes(email))
+    if (school) {
+      const usesGoogleProvider = user.providerData?.some((provider) => provider.providerId === 'google.com')
+      if (!usesGoogleProvider) return null
+      const profile = { role: 'admin', schoolId: school.id, email, active: true }
+      await setDoc(doc(db, 'users', user.uid), profile, { merge: true })
+      return profile
+    }
+
+    const localUserDoc = await getDoc(doc(db, 'users', user.uid))
+    const profile = localUserDoc.exists() ? localUserDoc.data() : null
+
+    if (profile?.role === 'admin' && typeof profile.schoolId === 'string' && profile.schoolId.trim()) {
+      const schoolDoc = await getDoc(doc(db, 'schools', profile.schoolId))
+      const allowedEmails = schoolDoc.exists() ? schoolDoc.data().authorizedEmails : null
+      if (Array.isArray(allowedEmails) && allowedEmails.length && !allowedEmails.map((value) => String(value).toLowerCase()).includes(email)) return null
+      return { ...profile, email }
+    }
+
+    return null
   } catch (err) {
     error(err, 'Não foi possível recuperar a escola deste usuário.')
     return null
@@ -1941,41 +2121,44 @@ if ($('#cancelCsvImportBtn')) $('#cancelCsvImportBtn').onclick = cancelCsvImport
 if ($('#closeCsvImportBtn')) $('#closeCsvImportBtn').onclick = cancelCsvImport
 if ($('#confirmCsvImportBtn')) $('#confirmCsvImportBtn').onclick = confirmCsvImport
 
-if ($('#loginForm')) {
-  $('#loginForm').onsubmit = async (x) => {
-    x.preventDefault();
-    const email = $('#loginForm input[type="email"]')?.value.trim();
-    const password = $('#loginForm input[type="password"]')?.value;
-    const b = $('#loginForm button[type="submit"]');
-    loading(b, true, 'Entrando…');
-
-    if (!canUseFirebase || !auth) {
-      toast('Firebase Auth indisponível. Verifique a configuração do projeto.', 'error');
-      loading(b, false);
+if ($('#googleLoginBtn')) {
+  $('#googleLoginBtn').onclick = async () => {
+    const button = $('#googleLoginBtn')
+    loading(button, true, 'Abrindo Google…')
+    if (!canUseFirebase || !auth || !googleProvider) {
+      toast('Login Google indisponível. Verifique a configuração de autenticação.', 'error')
+      loading(button, false)
       return
     }
-
     try {
-      await signInWithEmailAndPassword(auth, email, password)
+      await signInWithPopup(auth, googleProvider)
     } catch (err) {
-      error(err)
+      error(err, 'Não foi possível entrar com a conta Google.')
     } finally {
-      loading(b, false)
+      loading(button, false)
     }
-  };
+  }
 }
 
-if ($('#resetPasswordBtn')) {
-  $('#resetPasswordBtn').onclick = async () => { 
-    const email = $('#loginForm input[type="email"]')?.value.trim(); 
-    if (!email) return toast('Informe seu e-mail.', 'error'); 
-    if (!canUseFirebase || !auth) return toast('A recuperação de senha local não está ativa.', 'error'); 
-    try { 
-      await sendPasswordResetEmail(auth, email); 
-      toast('Se este e-mail pertencer a um administrador cadastrado, o link de recuperação foi enviado.') 
-    } catch (err) { 
-      error(err, 'Não foi possível enviar a recuperação.') 
-    } 
+if ($('#credeLoginForm')) {
+  $('#credeLoginForm').onsubmit = async (event) => {
+    event.preventDefault()
+    const button = $('#credeLoginBtn')
+    const password = $('#credePasswordInput')?.value || ''
+    loading(button, true, 'Validando acesso…')
+    if (!canUseFirebase || !auth) {
+      toast('Autenticação indisponível. Verifique o Firebase Authentication.', 'error')
+      loading(button, false)
+      return
+    }
+    try {
+      await signInWithEmailAndPassword(auth, LIBRIS_ADMIN_EMAIL, password)
+    } catch (err) {
+      error(err, 'Não foi possível entrar com a conta administrativa CREDE.')
+    } finally {
+      if ($('#credePasswordInput')) $('#credePasswordInput').value = ''
+      loading(button, false)
+    }
   }
 }
 
@@ -1990,9 +2173,11 @@ async function init() {
   const adminView = $('#adminView')
   const settingsButton = $('#openSettingsBtn')
   const logoutButton = $('#logoutBtn')
+  const backupButton = $('#backupDriveBtn')
   if (adminView) adminView.hidden = true
   if (settingsButton) settingsButton.hidden = true
   if (logoutButton) logoutButton.hidden = true
+  if (backupButton) backupButton.hidden = true
 
   if (!canUseFirebase || !db) {
     state.user = null
@@ -2013,6 +2198,17 @@ async function init() {
     state.user = user
     state.profile = await resolveUserSchool(user)
     if (auth.currentUser?.uid !== user.uid) return
+
+    if (state.profile?.role === 'libris_admin') {
+      const schools = await localStore.list('schools')
+      fillLibrisConfigurationForm(schools[0] || {})
+      if ($('#librisAdminView')) $('#librisAdminView').hidden = false
+      if (adminView) adminView.hidden = true
+      if (settingsButton) settingsButton.hidden = true
+      if (logoutButton) logoutButton.hidden = false
+      modal('loginModal', false)
+      return
+    }
 
     if (state.profile?.role !== 'admin' || typeof state.profile.schoolId !== 'string' || !state.profile.schoolId.trim()) {
       resetAdminState()
@@ -2052,7 +2248,9 @@ async function init() {
     if (adminView) adminView.hidden = false
     if (settingsButton) settingsButton.hidden = false
     if (logoutButton) logoutButton.hidden = false
+    if (backupButton) backupButton.hidden = false
     modal('loginModal', false)
+    await updateDriveBackupStatus()
   })
 }
 

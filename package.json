@@ -1,9 +1,13 @@
 {
   "scripts": {
-    "build:hosting": "node build-hosting.js"
+    "build:hosting": "node build-hosting.js",
+    "test": "node --test"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   }
 }

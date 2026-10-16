@@ -42,6 +42,48 @@
       </header>
 
       <main class="main-content">
+        <section id="librisAdminView" class="view" hidden>
+          <div class="admin-header">
+            <div>
+              <p class="eyebrow">Configuração local</p>
+              <h2>Administração Libris</h2>
+            </div>
+          </div>
+          <form id="librisConfigForm" class="panel form-grid settings-form">
+            <label>
+              <span>Identificador da escola</span>
+              <input id="librisSchoolIdInput" type="text" maxlength="80" pattern="[a-zA-Z0-9_\x2d]+" required />
+            </label>
+            <label>
+              <span>Nome da escola</span>
+              <input id="librisSchoolNameInput" type="text" maxlength="120" required />
+            </label>
+            <label class="school-name-field">
+              <span>Emails Google autorizados para o painel da escola</span>
+              <textarea id="librisAuthorizedEmailsInput" rows="4" placeholder="um email por linha" required></textarea>
+            </label>
+            <label>
+              <span>EmailJS: serviço</span>
+              <input id="librisEmailServiceInput" type="text" autocomplete="off" />
+            </label>
+            <label>
+              <span>EmailJS: template do leitor</span>
+              <input id="librisStudentTemplateInput" type="text" autocomplete="off" />
+            </label>
+            <label>
+              <span>EmailJS: template da coordenação</span>
+              <input id="librisCoordinationTemplateInput" type="text" autocomplete="off" />
+            </label>
+            <label>
+              <span>EmailJS: chave pública</span>
+              <input id="librisEmailPublicKeyInput" type="text" autocomplete="off" />
+            </label>
+            <div class="settings-actions">
+              <button class="btn btn-primary" type="submit">Salvar configuração local</button>
+            </div>
+          </form>
+        </section>
+
         <section id="adminView" class="view is-active" hidden>
           <div class="admin-header">
             <div>
@@ -49,10 +91,14 @@
               <h2>Gestão da biblioteca escolar</h2>
             </div>
             <div class="action-row">
+              <button class="btn btn-secondary" id="backupDriveBtn" type="button" hidden>Backup no Drive</button>
+              <button class="btn btn-secondary" id="restoreBackupBtn" type="button">Restaurar JSON</button>
+              <input id="restoreBackupInput" type="file" accept=".json,application/json" hidden />
               <button class="btn btn-secondary" id="importCsvBtn" type="button">Importar CSV</button>
               <button class="btn btn-secondary" id="exportBtn" type="button">Exportar</button>
             </div>
           </div>
+          <p id="backupDriveStatus" class="modal-description" hidden></p>
 
           <div id="kpiGrid" class="kpi-grid"></div>
 
@@ -139,7 +185,6 @@
                         <option value="all">Todos os empréstimos</option>
                         <option value="student">Alunos</option>
                         <option value="teacher">Professores</option>
-                        <option value="other">Outros</option>
                         <option value="overdue">Atrasados</option>
                       </select>
                     </label>
@@ -262,17 +307,20 @@
           <div class="brand-mark accent">📚</div>
           <h3>Acesso administrativo</h3>
         </div>
-        <form id="loginForm" class="login-form">
+        <div id="loginForm" class="login-form">
+          <p class="modal-description">A equipe da escola entra com uma conta Google autorizada.</p>
+          <button class="btn btn-primary" id="googleLoginBtn" type="button">Entrar com Google</button>
+        </div>
+        <form id="credeLoginForm" class="login-form">
           <label>
-            <span>E-mail</span>
-            <input type="email" autocomplete="email" required />
+            <span>Email administrativo CREDE</span>
+            <input type="email" value="admin@crede17.ce.gov.br" autocomplete="username" readonly />
           </label>
           <label>
             <span>Senha</span>
-            <input type="password" autocomplete="current-password" required />
+            <input id="credePasswordInput" type="password" autocomplete="current-password" required />
           </label>
-          <button class="btn btn-primary" type="submit">Entrar no painel</button>
-          <button class="btn btn-ghost" id="resetPasswordBtn" type="button">Esqueci minha senha</button>
+          <button class="btn btn-secondary" id="credeLoginBtn" type="submit">Entrar como administração CREDE</button>
         </form>
       </div>
     </div>

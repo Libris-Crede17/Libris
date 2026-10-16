@@ -7,6 +7,8 @@ const publicFiles = [
   'index.html',
   'styles.css',
   'script.js',
+  'local-store.mjs',
+  'local-data.mjs',
   'firebase.js',
   'Librissf.png',
   'manifest.webmanifest',

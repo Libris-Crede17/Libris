@@ -2,30 +2,11 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/fireba
 import {
   getAuth,
   onAuthStateChanged,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
-  sendPasswordResetEmail
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  addDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  writeBatch,
-  query,       
-  where,
-  orderBy,
-  onSnapshot, 
-  runTransaction,
-  serverTimestamp,
-  Timestamp,
-  increment
-} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js'
 
 export const firebaseConfig = {
   apiKey: 'AIzaSyBWVnNcSHqt3LqsnvZYbCMc7S5wHZuWwaY',
@@ -46,28 +27,14 @@ export const firebaseReady = Boolean(
 
 export const app = firebaseReady ? initializeApp(firebaseConfig) : null
 export const auth = app ? getAuth(app) : null
-export const db = app ? getFirestore(app) : null
+export const googleProvider = auth ? new GoogleAuthProvider() : null
+export const googleDriveProvider = auth ? new GoogleAuthProvider() : null
+if (googleDriveProvider) googleDriveProvider.addScope('https://www.googleapis.com/auth/drive.file')
 
 export {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
-  sendPasswordResetEmail,
-  collection,
-  doc,
-  getDoc,
-  addDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  writeBatch,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  runTransaction,
-  serverTimestamp,
-  Timestamp,
-  increment
+  GoogleAuthProvider
 }

@@ -4,6 +4,8 @@ const STATIC_FILES = [
   './index.html',
   './styles.css',
   './script.js',
+  './local-store.mjs',
+  './local-data.mjs',
   './firebase.js',
   './manifest.webmanifest',
   './Librissf.png',
