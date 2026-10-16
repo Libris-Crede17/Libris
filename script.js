@@ -1451,6 +1451,8 @@ function renderLoans() {
       ? role === 'student' || role === 'aluno'
       : state.loanFilter === 'teacher'
         ? role === 'teacher' || role === 'professor'
+      : state.loanFilter === 'other'
+        ? role === 'guardian' || role === 'outros' || (role !== 'student' && role !== 'aluno' && role !== 'teacher' && role !== 'professor')
         : state.loanFilter === 'overdue'
           ? overdue(l)
           : true
