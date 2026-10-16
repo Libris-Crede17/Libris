@@ -196,7 +196,6 @@ function renderReaders() {
   const q = state.readerQuery.toLowerCase().trim()
   const list = state.readers.filter((r) => !q || [r.name, r.type, r.role, r.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
   body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || (r.role === 'teacher' ? 'Professor' : r.role === 'student' ? 'Aluno' : 'Outros'))}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td>...
-  $$('[data-edit-reader]').forEach((b) => b.onclick = () => editReader(b.dataset.editReader)); 
   $$('[data-del-reader]').forEach((b) => b.onclick = () => removeReader(b.dataset.delReader)); 
   renderReaderSelector()
 }
