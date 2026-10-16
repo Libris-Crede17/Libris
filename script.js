@@ -402,7 +402,7 @@ async function addReader(event) {
   const button = $('#readerForm button[type="submit"]')
   const editingId = $('#readerIdInput')?.value
   const type = $('#readerTypeInput')?.value || 'Aluno'
-  const role = type === 'Professor' ? 'teacher' : type === 'Responsável' ? 'guardian' : 'student'
+  const role = type === 'Professor' ? 'teacher' : type === 'Aluno' ? 'student' : 'other'
   const reader = {
     schoolId: config.currentSchoolId,
     name: $('#readerNameInput')?.value.trim(),
